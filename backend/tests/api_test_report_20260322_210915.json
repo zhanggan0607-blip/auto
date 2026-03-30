@@ -1,0 +1,409 @@
+{
+  "timestamp": "2026-03-22 21:09:15",
+  "summary": {
+    "total": 43,
+    "passed": 26,
+    "failed": 17,
+    "warnings": 0,
+    "pass_rate": "60.5%"
+  },
+  "results": {
+    "connectivity": [
+      {
+        "test_name": "API根路径",
+        "passed": false,
+        "message": "状态码: 404",
+        "response_time": 2072.86,
+        "status_code": 404,
+        "timestamp": "2026-03-22 21:07:13",
+        "details": {}
+      },
+      {
+        "test_name": "端点 /api/v1/auth/",
+        "passed": true,
+        "message": "端点可访问 (状态码: 401)",
+        "response_time": 2049.14,
+        "status_code": 401,
+        "timestamp": "2026-03-22 21:07:15",
+        "details": {}
+      },
+      {
+        "test_name": "端点 /api/v1/tenders/",
+        "passed": true,
+        "message": "端点可访问 (状态码: 401)",
+        "response_time": 2056.06,
+        "status_code": 401,
+        "timestamp": "2026-03-22 21:07:17",
+        "details": {}
+      },
+      {
+        "test_name": "端点 /api/v1/documents/",
+        "passed": false,
+        "message": "状态码: 404",
+        "response_time": 2056.92,
+        "status_code": 404,
+        "timestamp": "2026-03-22 21:07:19",
+        "details": {}
+      },
+      {
+        "test_name": "端点 /api/v1/bids/",
+        "passed": false,
+        "message": "状态码: 404",
+        "response_time": 2059.93,
+        "status_code": 404,
+        "timestamp": "2026-03-22 21:07:21",
+        "details": {}
+      },
+      {
+        "test_name": "端点 /api/v1/notifications/",
+        "passed": true,
+        "message": "端点可访问 (状态码: 401)",
+        "response_time": 2052.01,
+        "status_code": 401,
+        "timestamp": "2026-03-22 21:07:23",
+        "details": {}
+      },
+      {
+        "test_name": "端点 /api/v1/crawler/",
+        "passed": true,
+        "message": "端点可访问 (状态码: 401)",
+        "response_time": 2049.6,
+        "status_code": 401,
+        "timestamp": "2026-03-22 21:07:25",
+        "details": {}
+      },
+      {
+        "test_name": "端点 /api/v1/enterprise/",
+        "passed": true,
+        "message": "端点可访问 (状态码: 401)",
+        "response_time": 2054.39,
+        "status_code": 401,
+        "timestamp": "2026-03-22 21:07:27",
+        "details": {}
+      },
+      {
+        "test_name": "端点 /api/v1/openclaw/",
+        "passed": true,
+        "message": "端点可访问 (状态码: 401)",
+        "response_time": 2052.02,
+        "status_code": 401,
+        "timestamp": "2026-03-22 21:07:30",
+        "details": {}
+      },
+      {
+        "test_name": "端点 /api/v1/vectorlib/",
+        "passed": true,
+        "message": "端点可访问 (状态码: 401)",
+        "response_time": 2034.33,
+        "status_code": 401,
+        "timestamp": "2026-03-22 21:07:32",
+        "details": {}
+      }
+    ],
+    "functional": [
+      {
+        "test_name": "用户登录",
+        "passed": true,
+        "message": "登录成功，获取Token",
+        "response_time": 2401.53,
+        "status_code": 200,
+        "timestamp": "2026-03-22 21:07:34",
+        "details": {}
+      },
+      {
+        "test_name": "Token刷新",
+        "passed": true,
+        "message": "Token刷新成功",
+        "response_time": 2135.95,
+        "status_code": 200,
+        "timestamp": "2026-03-22 21:07:36",
+        "details": {}
+      },
+      {
+        "test_name": "获取当前用户",
+        "passed": true,
+        "message": "当前用户: admin",
+        "response_time": 2072.98,
+        "status_code": 200,
+        "timestamp": "2026-03-22 21:07:38",
+        "details": {}
+      },
+      {
+        "test_name": "企业创建",
+        "passed": true,
+        "message": "创建成功，ID: 10",
+        "response_time": 2090.22,
+        "status_code": 201,
+        "timestamp": "2026-03-22 21:07:40",
+        "details": {}
+      },
+      {
+        "test_name": "企业列表",
+        "passed": true,
+        "message": "获取企业列表成功",
+        "response_time": 2081.26,
+        "status_code": 200,
+        "timestamp": "2026-03-22 21:07:42",
+        "details": {}
+      },
+      {
+        "test_name": "企业详情",
+        "passed": true,
+        "message": "获取企业详情成功",
+        "response_time": 2175.28,
+        "status_code": 200,
+        "timestamp": "2026-03-22 21:07:45",
+        "details": {}
+      },
+      {
+        "test_name": "招标列表",
+        "passed": true,
+        "message": "获取成功，共0条记录",
+        "response_time": 2186.46,
+        "status_code": 200,
+        "timestamp": "2026-03-22 21:07:47",
+        "details": {}
+      },
+      {
+        "test_name": "投标记录列表",
+        "passed": true,
+        "message": "获取投标记录成功",
+        "response_time": 2080.98,
+        "status_code": 200,
+        "timestamp": "2026-03-22 21:07:49",
+        "details": {}
+      },
+      {
+        "test_name": "通知列表",
+        "passed": true,
+        "message": "获取通知列表成功",
+        "response_time": 2072.39,
+        "status_code": 200,
+        "timestamp": "2026-03-22 21:07:51",
+        "details": {}
+      },
+      {
+        "test_name": "未读消息数",
+        "passed": true,
+        "message": "未读消息: 0条",
+        "response_time": 2082.51,
+        "status_code": 200,
+        "timestamp": "2026-03-22 21:07:53",
+        "details": {}
+      },
+      {
+        "test_name": "采集计划列表",
+        "passed": true,
+        "message": "获取采集计划成功",
+        "response_time": 2092.14,
+        "status_code": 200,
+        "timestamp": "2026-03-22 21:07:55",
+        "details": {}
+      },
+      {
+        "test_name": "向量库文档列表",
+        "passed": true,
+        "message": "获取向量库文档成功",
+        "response_time": 2075.75,
+        "status_code": 200,
+        "timestamp": "2026-03-22 21:07:57",
+        "details": {}
+      },
+      {
+        "test_name": "文档模板列表",
+        "passed": true,
+        "message": "获取文档模板成功",
+        "response_time": 2076.55,
+        "status_code": 200,
+        "timestamp": "2026-03-22 21:07:59",
+        "details": {}
+      },
+      {
+        "test_name": "LLM提供商列表",
+        "passed": false,
+        "message": "获取失败: <!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta http-equiv=\"content-type\" content=\"text/html; charset=utf-8\">\n  <title>Page not found at /api/v1/openclaw/llm-providers/</title>\n  <meta name=\"robots\" c",
+        "response_time": 2042.05,
+        "status_code": 404,
+        "timestamp": "2026-03-22 21:08:01",
+        "details": {}
+      }
+    ],
+    "performance": [
+      {
+        "test_name": "响应时间 /api/v1/enterprise/enterprises/",
+        "passed": false,
+        "message": "平均: 2135ms, 最大: 2212ms, 最小: 2090ms",
+        "response_time": 2135.35,
+        "status_code": null,
+        "timestamp": "2026-03-22 21:08:12",
+        "details": {}
+      },
+      {
+        "test_name": "响应时间 /api/v1/tenders/",
+        "passed": false,
+        "message": "平均: 2117ms, 最大: 2184ms, 最小: 2070ms",
+        "response_time": 2117.07,
+        "status_code": null,
+        "timestamp": "2026-03-22 21:08:22",
+        "details": {}
+      },
+      {
+        "test_name": "响应时间 /api/v1/bids/records/",
+        "passed": false,
+        "message": "平均: 2121ms, 最大: 2190ms, 最小: 2077ms",
+        "response_time": 2120.88,
+        "status_code": null,
+        "timestamp": "2026-03-22 21:08:33",
+        "details": {}
+      },
+      {
+        "test_name": "响应时间 /api/v1/notifications/",
+        "passed": false,
+        "message": "平均: 2123ms, 最大: 2217ms, 最小: 2061ms",
+        "response_time": 2123.29,
+        "status_code": null,
+        "timestamp": "2026-03-22 21:08:44",
+        "details": {}
+      },
+      {
+        "test_name": "并发请求测试",
+        "passed": false,
+        "message": "10并发，成功率: 100%, 平均响应: 2241ms",
+        "response_time": 2241.26,
+        "status_code": null,
+        "timestamp": "2026-03-22 21:08:46",
+        "details": {}
+      }
+    ],
+    "security": [
+      {
+        "test_name": "未授权访问 /api/v1/enterprise/enterprises/",
+        "passed": false,
+        "message": "应返回401/403，实际返回error",
+        "response_time": 2050.34,
+        "status_code": null,
+        "timestamp": "2026-03-22 21:08:48",
+        "details": {}
+      },
+      {
+        "test_name": "未授权访问 /api/v1/tenders/",
+        "passed": false,
+        "message": "应返回401/403，实际返回error",
+        "response_time": 2066.87,
+        "status_code": null,
+        "timestamp": "2026-03-22 21:08:50",
+        "details": {}
+      },
+      {
+        "test_name": "未授权访问 /api/v1/bids/records/",
+        "passed": false,
+        "message": "应返回401/403，实际返回error",
+        "response_time": 2055.06,
+        "status_code": null,
+        "timestamp": "2026-03-22 21:08:52",
+        "details": {}
+      },
+      {
+        "test_name": "未授权访问 /api/v1/notifications/",
+        "passed": false,
+        "message": "应返回401/403，实际返回error",
+        "response_time": 2047.85,
+        "status_code": null,
+        "timestamp": "2026-03-22 21:08:54",
+        "details": {}
+      },
+      {
+        "test_name": "无效Token测试",
+        "passed": false,
+        "message": "应返回401/403，实际返回error",
+        "response_time": 2060.16,
+        "status_code": null,
+        "timestamp": "2026-03-22 21:08:56",
+        "details": {}
+      },
+      {
+        "test_name": "SQL注入测试",
+        "passed": true,
+        "message": "输入被正确处理",
+        "response_time": 2095.24,
+        "status_code": null,
+        "timestamp": "2026-03-22 21:08:58",
+        "details": {}
+      },
+      {
+        "test_name": "XSS注入测试",
+        "passed": false,
+        "message": "可能存在XSS漏洞",
+        "response_time": 2086.82,
+        "status_code": 201,
+        "timestamp": "2026-03-22 21:09:00",
+        "details": {}
+      },
+      {
+        "test_name": "XSS注入测试",
+        "passed": true,
+        "message": "XSS输入被正确处理或过滤",
+        "response_time": 2084.19,
+        "status_code": 201,
+        "timestamp": "2026-03-22 21:09:03",
+        "details": {}
+      },
+      {
+        "test_name": "输入验证-空字段",
+        "passed": false,
+        "message": "应返回400，实际返回error",
+        "response_time": 2065.98,
+        "status_code": null,
+        "timestamp": "2026-03-22 21:09:05",
+        "details": {}
+      },
+      {
+        "test_name": "输入验证-无效类型",
+        "passed": false,
+        "message": "应返回400，实际返回error",
+        "response_time": 2083.4,
+        "status_code": null,
+        "timestamp": "2026-03-22 21:09:07",
+        "details": {}
+      }
+    ],
+    "data_consistency": [
+      {
+        "test_name": "响应格式 /api/v1/enterprise/enterprises/",
+        "passed": true,
+        "message": "响应格式符合规范",
+        "response_time": 2098.99,
+        "status_code": 200,
+        "timestamp": "2026-03-22 21:09:09",
+        "details": {}
+      },
+      {
+        "test_name": "响应格式 /api/v1/tenders/",
+        "passed": true,
+        "message": "响应格式符合规范",
+        "response_time": 2070.14,
+        "status_code": 200,
+        "timestamp": "2026-03-22 21:09:11",
+        "details": {}
+      },
+      {
+        "test_name": "响应格式 /api/v1/bids/records/",
+        "passed": true,
+        "message": "响应格式符合规范",
+        "response_time": 2083.91,
+        "status_code": 200,
+        "timestamp": "2026-03-22 21:09:13",
+        "details": {}
+      },
+      {
+        "test_name": "分页功能",
+        "passed": true,
+        "message": "响应格式可接受",
+        "response_time": 2190.97,
+        "status_code": 200,
+        "timestamp": "2026-03-22 21:09:15",
+        "details": {}
+      }
+    ]
+  }
+}

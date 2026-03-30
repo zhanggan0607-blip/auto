@@ -1,0 +1,201 @@
+/**
+ * 设计令牌 - Design Tokens
+ * 斗栱云风格 - 蓝绿配色主题
+ * 专业、沉稳、现代的企业级SaaS风格
+ */
+
+:root {
+  /* 主题色 - 斗栱云蓝绿配色系 */
+  --color-primary: #0066CC;
+  --color-primary-light: #3399FF;
+  --color-primary-dark: #004C99;
+  --color-primary-rgb: 0, 102, 204;
+
+  /* 辅助色 - Teal绿 */
+  --color-success: #00A86B;
+  --color-success-light: #00C87A;
+  --color-success-dark: #007A4D;
+  --color-success-rgb: 0, 168, 107;
+
+  /* 警告色 - 橙色 */
+  --color-warning: #FF9500;
+  --color-warning-light: #FFAD33;
+  --color-warning-dark: #CC7700;
+
+  /* 危险色 - 红色 */
+  --color-danger: #E53935;
+  --color-danger-light: #FF6F61;
+  --color-danger-dark: #C62828;
+
+  /* 信息色 - 灰蓝 */
+  --color-info: #607D8B;
+  --color-info-light: #78909C;
+  --color-info-dark: #455A64;
+
+  /* 文字色 - 深色系 */
+  --color-text-primary: #1A1A1A;
+  --color-text-regular: #333333;
+  --color-text-secondary: #666666;
+  --color-text-placeholder: #999999;
+  --color-text-disabled: #CCCCCC;
+
+  /* 边框色 */
+  --color-border: #E0E0E0;
+  --color-border-light: #EBEBEB;
+  --color-border-lighter: #F0F0F0;
+  --color-border-extra-light: #F5F5F5;
+  --color-border-focus: var(--color-primary);
+
+  /* 背景色 - 浅灰白 */
+  --color-bg-page: #F7F8FA;
+  --color-bg-base: #F0F2F5;
+  --color-bg-white: #FFFFFF;
+  --color-bg-overlay: rgba(0, 0, 0, 0.45);
+  --color-bg-hover: rgba(0, 102, 204, 0.04);
+  --color-bg-active: rgba(0, 102, 204, 0.08);
+
+  /* 侧边栏 - 深蓝灰 */
+  --sidebar-bg: #1E2A3A;
+  --sidebar-bg-light: #2C3E50;
+  --sidebar-text: rgba(255, 255, 255, 0.85);
+  --sidebar-text-active: #FFFFFF;
+  --sidebar-hover-bg: rgba(255, 255, 255, 0.08);
+  --sidebar-active-bg: linear-gradient(90deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+  --sidebar-active-border: var(--color-primary-light);
+
+  /* 阴影 - 多层次柔和阴影 */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.10);
+  --shadow-xl: 0 12px 32px rgba(0, 0, 0, 0.12);
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-header: 0 1px 4px rgba(0, 0, 0, 0.05);
+
+  /* 圆角 - 统一圆角系统 */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-full: 9999px;
+
+  /* 字体大小 */
+  --font-size-xs: 12px;
+  --font-size-sm: 13px;
+  --font-size-base: 14px;
+  --font-size-md: 15px;
+  --font-size-lg: 16px;
+  --font-size-xl: 18px;
+  --font-size-2xl: 20px;
+  --font-size-3xl: 24px;
+  --font-size-4xl: 30px;
+
+  /* 字重 */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* 间距 */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-base: 16px;
+  --spacing-lg: 20px;
+  --spacing-xl: 24px;
+  --spacing-2xl: 32px;
+  --spacing-3xl: 40px;
+  --spacing-4xl: 48px;
+
+  /* 过渡 */
+  --transition-fast: 0.15s ease;
+  --transition-base: 0.2s ease;
+  --transition-slow: 0.3s ease;
+  --transition-bounce: 0.3s cubic-bezier(0.68, -0.2, 0.32, 1.2);
+
+  /* 侧边栏宽度 */
+  --sidebar-width: 220px;
+  --sidebar-collapsed-width: 64px;
+
+  /* 头部高度 */
+  --header-height: 56px;
+
+  /* z-index层级 */
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-fixed: 300;
+  --z-modal-backdrop: 400;
+  --z-modal: 500;
+  --z-popover: 600;
+  --z-tooltip: 700;
+  --z-notification: 800;
+
+  /* 斗栱云品牌色 */
+  --brand-blue: #0066CC;
+  --brand-teal: #00A86B;
+  --brand-gradient: linear-gradient(135deg, var(--color-primary) 0%, #0088CC 100%);
+  --brand-gradient-hover: linear-gradient(135deg, var(--color-primary-light) 0%, var(--color-primary) 100%);
+}
+
+/* 兼容旧SCSS变量 */
+$primary-color: var(--color-primary);
+$success-color: var(--color-success);
+$warning-color: var(--color-warning);
+$danger-color: var(--color-danger);
+$info-color: var(--color-info);
+
+$text-primary: var(--color-text-primary);
+$text-regular: var(--color-text-regular);
+$text-secondary: var(--color-text-secondary);
+$text-placeholder: var(--color-text-placeholder);
+
+$border-base: var(--color-border);
+$border-light: var(--color-border-light);
+$border-lighter: var(--color-border-lighter);
+$border-extra-light: var(--color-border-extra-light);
+
+$bg-white: var(--color-bg-white);
+$bg-page: var(--color-bg-page);
+$bg-base: var(--color-bg-base);
+
+$shadow-base: var(--shadow-sm);
+$shadow-light: var(--shadow-md);
+
+$font-size-extra-large: var(--font-size-2xl);
+$font-size-large: var(--font-size-xl);
+$font-size-medium: var(--font-size-lg);
+$font-size-base: var(--font-size-base);
+$font-size-small: var(--font-size-sm);
+$font-size-extra-small: var(--font-size-xs);
+
+$spacing-xs: var(--spacing-xs);
+$spacing-sm: var(--spacing-sm);
+$spacing-md: var(--spacing-md);
+$spacing-lg: var(--spacing-lg);
+$spacing-xl: var(--spacing-xl);
+
+$border-radius-base: var(--radius-md);
+$border-radius-small: var(--radius-sm);
+$border-radius-large: var(--radius-lg);
+
+$transition-base: all var(--transition-base);
+$transition-fast: all var(--transition-fast);
+
+$breakpoint-xs: 480px;
+$breakpoint-sm: 768px;
+$breakpoint-md: 992px;
+$breakpoint-lg: 1200px;
+$breakpoint-xl: 1920px;
+
+$sidebar-width: var(--sidebar-width);
+$sidebar-collapsed-width: var(--sidebar-collapsed-width);
+$header-height: var(--header-height);
+
+$z-index-dropdown: var(--z-dropdown);
+$z-index-sticky: var(--z-sticky);
+$z-index-fixed: var(--z-fixed);
+$z-index-modal-backdrop: var(--z-modal-backdrop);
+$z-index-modal: var(--z-modal);
+$z-index-popover: var(--z-popover);
+$z-index-tooltip: var(--z-tooltip);

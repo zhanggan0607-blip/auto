@@ -1,0 +1,10 @@
+"""
+Common模块应用配置
+"""
+from django.apps import AppConfig
+
+
+class CommonConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'common'
+    verbose_name = '公共模块'
