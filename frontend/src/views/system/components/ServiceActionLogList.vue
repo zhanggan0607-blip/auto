@@ -64,9 +64,13 @@ const fetchActionLogs = async () => {
       service_id: props.serviceId,
       hours: 24
     })
-    logs.value = res.results || res || []
+    const data = res?.data || res
+    logs.value = Array.isArray(data) ? data :
+                  Array.isArray(data?.results) ? data.results :
+                  Array.isArray(data?.list) ? data.list : []
   } catch (error) {
     console.error('获取操作日志失败:', error)
+    logs.value = []
   }
 }
 

@@ -127,7 +127,7 @@ def tender_scan():
                 schedule_log.matched_count = matched_count
                 schedule_log.deleted_count = deleted_count
                 schedule_log.finished_at = timezone.now()
-                schedule_log.duration = (schedule_log.finished_at - schedule_log.started_at).seconds
+                schedule_log.duration = (schedule_log.finished_at - schedule_log.started_at).total_seconds()
                 schedule_log.save()
 
                 schedule.last_run_at = timezone.now()

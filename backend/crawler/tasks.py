@@ -588,8 +588,9 @@ def scheduled_crawl_with_match(self, schedule_id: int):
         {'title': '创建采集会话', 'description': '正在创建采集会话...', 'progress': 10},
         {'title': '执行网页采集', 'description': '正在从网站采集数据...', 'progress': 35},
         {'title': '保存采集结果', 'description': '正在保存采集结果...', 'progress': 50},
-        {'title': '转换为招标项目', 'description': '正在转换为招标项目...', 'progress': 65},
-        {'title': '执行资质匹配', 'description': '正在匹配企业资质...', 'progress': 85},
+        {'title': '转换为招标项目', 'description': '正在转换为招标项目...', 'progress': 60},
+        {'title': '执行内容识别', 'description': '正在识别内容结构...', 'progress': 75},
+        {'title': '执行资质匹配', 'description': '正在匹配企业资质...', 'progress': 90},
         {'title': '完成任务', 'description': '正在完成最后的处理...', 'progress': 95},
     ]
 
@@ -767,7 +768,7 @@ def scheduled_crawl_with_match(self, schedule_id: int):
         session.status = 'completed'
         session.result_count = len(results)
         session.finished_at = timezone.now()
-        session.duration = (session.finished_at - session.started_at).seconds
+        session.duration = (session.finished_at - session.started_at).total_seconds()
         session.save()
 
         schedule_log.result_count = len(results)
@@ -827,11 +828,50 @@ def scheduled_crawl_with_match(self, schedule_id: int):
 
         logger.info(f"定时采集完成: {schedule.name}, 采集 {len(results)} 条, 保存 {saved_to_tenders} 条")
 
+        recognized_count = 0
+        recognition_errors = 0
+
+        progress_tracker.update_progress(task_id, 6, 68, f"正在执行内容识别...")
+        for crawl_result in crawl_results:
+            try:
+                from openclaw.agents.content_recognition_agent import ContentRecognitionAgent
+                import asyncio
+
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+                async def run_recognition():
+                    agent = ContentRecognitionAgent()
+                    return await agent.execute({
+                        'content': '',
+                        'url': crawl_result.source_url,
+                        'source_type': template.website_type if template else 'other',
+                        'content_type': 'tender',
+                        'raw_data': crawl_result.raw_data or {},
+                        'save_to_db': True,
+                        'validate_quality': True
+                    })
+
+                result = loop.run_until_complete(run_recognition())
+                loop.close()
+
+                if result.success:
+                    recognized_count += 1
+                else:
+                    recognition_errors += 1
+
+            except Exception as e:
+                logger.warning(f"内容识别失败 {crawl_result.id}: {str(e)}")
+                recognition_errors += 1
+                continue
+
+        logger.info(f"内容识别完成: 成功 {recognized_count}, 失败 {recognition_errors}")
+
         matched_count = 0
         deleted_count = 0
 
         if schedule.auto_match:
-            progress_tracker.update_progress(task_id, 7, 85, "正在执行企业资质匹配...")
+            progress_tracker.update_progress(task_id, 7, 90, "正在执行企业资质匹配...")
             match_result = tender_qualification_matcher.process_new_tenders(
                 user_id=schedule.created_by_id if schedule.created_by else None,
                 auto_delete=schedule.auto_delete_unmatched,
@@ -847,7 +887,11 @@ def scheduled_crawl_with_match(self, schedule_id: int):
         schedule_log.deleted_count = deleted_count
         schedule_log.status = 'success'
         schedule_log.finished_at = timezone.now()
-        schedule_log.duration = (schedule_log.finished_at - schedule_log.started_at).seconds
+        schedule_log.duration = (schedule_log.finished_at - schedule_log.started_at).total_seconds()
+        schedule_log.details = {
+            'recognized_count': recognized_count,
+            'recognition_errors': recognition_errors
+        }
         schedule_log.save()
 
         schedule.last_run_at = timezone.now()
@@ -859,6 +903,8 @@ def scheduled_crawl_with_match(self, schedule_id: int):
         progress_tracker.complete_task(task_id, {
             'result_count': len(results),
             'saved_count': saved_to_tenders,
+            'recognized_count': recognized_count,
+            'recognition_errors': recognition_errors,
             'matched_count': matched_count,
             'deleted_count': deleted_count
         })
@@ -870,6 +916,8 @@ def scheduled_crawl_with_match(self, schedule_id: int):
             'schedule_id': schedule_id,
             'result_count': len(results),
             'saved_count': saved_to_tenders,
+            'recognized_count': recognized_count,
+            'recognition_errors': recognition_errors,
             'matched_count': matched_count,
             'deleted_count': deleted_count
         }
@@ -882,7 +930,7 @@ def scheduled_crawl_with_match(self, schedule_id: int):
         schedule_log.status = 'failed'
         schedule_log.error_message = str(e)
         schedule_log.finished_at = timezone.now()
-        schedule_log.duration = (schedule_log.finished_at - schedule_log.started_at).seconds
+        schedule_log.duration = (schedule_log.finished_at - schedule_log.started_at).total_seconds()
         schedule_log.save()
 
         if session:

@@ -7,7 +7,9 @@ from .views import (
     WebsiteTemplateViewSet,
     CrawlSessionViewSet,
     CrawlResultViewSet,
-    CrawlLogViewSet
+    CrawlLogViewSet,
+    ContentRecognitionRuleViewSet,
+    RecognizedContentViewSet
 )
 from .scheduler_views import (
     CrawlScheduleViewSet,
@@ -29,6 +31,8 @@ router.register(r'logs', CrawlLogViewSet, basename='crawl-log')
 router.register(r'schedules', CrawlScheduleViewSet, basename='crawl-schedule')
 router.register(r'schedule-logs', CrawlScheduleLogViewSet, basename='crawl-schedule-log')
 router.register(r'qualification-match', QualificationMatchViewSet, basename='qualification-match')
+router.register(r'recognition-rules', ContentRecognitionRuleViewSet, basename='recognition-rule')
+router.register(r'recognized', RecognizedContentViewSet, basename='recognized-content')
 
 urlpatterns = [
     path('', include(router.urls)),

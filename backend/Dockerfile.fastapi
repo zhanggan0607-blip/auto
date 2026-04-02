@@ -15,15 +15,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY backend/requirements.txt /app/requirements.txt
+COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY backend/fastapi_app /app/fastapi_app
-COPY backend/config /app/config
-COPY backend/services /app/services
-COPY backend/apps /app/apps
-COPY backend/core /app/core
-COPY backend/utils /app/utils
+COPY fastapi_app /app/fastapi_app
+COPY config /app/config
+COPY services /app/services
+COPY apps /app/apps
+COPY core /app/core
+COPY utils /app/utils
 
 RUN mkdir -p /var/log/bid_auto
 

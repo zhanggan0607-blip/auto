@@ -55,7 +55,7 @@ class EnterpriseKeyPersonnel(models.Model):
     personnel_id = models.CharField('人员唯一标识', max_length=50, unique=True, blank=True, null=True,
                                     help_text='系统自动生成的流水号或人员ID')
     name = models.CharField('姓名', max_length=100)
-    id_number = models.CharField('身份证号', max_length=20, blank=True, null=True)
+    id_number = models.CharField('身份证号', max_length=500, blank=True, null=True)
     birth_date = models.DateField('出生年月', blank=True, null=True)
 
     builder_certificate = models.CharField('建造师证书', max_length=200, blank=True, null=True)

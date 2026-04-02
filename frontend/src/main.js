@@ -43,12 +43,9 @@ import {
 import App from './App.vue'
 import router from './router'
 import StatusBadge from '@/components/StatusBadge.vue'
-import { registerXssDirectives } from '@/directives/xss'
 import '@/assets/styles/main.scss'
 
 const app = createApp(App)
-
-registerXssDirectives(app)
 
 app.config.errorHandler = (err, vm, info) => {
   if (err.message && err.message.includes('ResizeObserver')) {

@@ -143,3 +143,72 @@ class SearchConfigSerializer(serializers.Serializer):
     page_param = serializers.CharField(max_length=50, default='page', help_text='页码参数名')
     encoding = serializers.CharField(max_length=20, default='utf-8', help_text='编码')
     method = serializers.ChoiceField(choices=['GET', 'POST'], default='GET', help_text='请求方法')
+
+
+class ContentRecognitionRuleSerializer(serializers.ModelSerializer):
+    """
+    内容识别规则序列化器
+    """
+    content_type_display = serializers.CharField(source='get_content_type_display', read_only=True)
+
+    class Meta:
+        model = None
+        from .models import ContentRecognitionRule
+        model = ContentRecognitionRule
+        fields = '__all__'
+        read_only_fields = ['created_at', 'updated_at']
+
+
+class RecognizedContentSerializer(serializers.ModelSerializer):
+    """
+    已识别内容序列化器
+    """
+    source_type_display = serializers.CharField(source='get_source_type_display', read_only=True)
+    content_type_display = serializers.CharField(source='get_content_type_display', read_only=True)
+    quality_grade_display = serializers.CharField(source='get_quality_grade_display', read_only=True)
+    rule_name = serializers.CharField(source='rule.name', read_only=True)
+
+    class Meta:
+        model = None
+        from .models import RecognizedContent
+        model = RecognizedContent
+        fields = '__all__'
+        read_only_fields = ['created_at', 'updated_at']
+
+
+class RecognizedContentListSerializer(serializers.ModelSerializer):
+    """
+    已识别内容列表序列化器
+    """
+    source_type_display = serializers.CharField(source='get_source_type_display', read_only=True)
+    content_type_display = serializers.CharField(source='get_content_type_display', read_only=True)
+    quality_grade_display = serializers.CharField(source='get_quality_grade_display', read_only=True)
+
+    class Meta:
+        model = None
+        from .models import RecognizedContent
+        model = RecognizedContent
+        fields = ['id', 'title', 'source_url', 'source_type', 'source_type_display',
+                  'content_type', 'content_type_display', 'region', 'industry',
+                  'purchaser_name', 'agency_name', 'budget', 'publish_date',
+                  'deadline_date', 'quality_score', 'quality_grade', 'quality_grade_display',
+                  'is_processed', 'created_at']
+
+
+class BatchRecognizeSerializer(serializers.Serializer):
+    """
+    批量识别序列化器
+    """
+    items = serializers.ListField(
+        child=serializers.DictField(),
+        min_length=1,
+        max_length=100,
+        help_text='要识别的内容列表'
+    )
+    content_type = serializers.ChoiceField(
+        choices=['tender', 'enterprise', 'document', 'general'],
+        default='tender',
+        help_text='内容类型'
+    )
+    save_to_db = serializers.BooleanField(default=True, help_text='是否保存到数据库')
+    validate_quality = serializers.BooleanField(default=True, help_text='是否验证质量')

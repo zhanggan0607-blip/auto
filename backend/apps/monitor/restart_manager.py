@@ -2,6 +2,7 @@
 服务自动重启与告警模块
 """
 import logging
+import platform
 import subprocess
 from datetime import timedelta
 from typing import Dict, Any, List, Optional
@@ -23,10 +24,34 @@ class ServiceRestartManager:
         'celery_beat': ['celery', '-A', 'config', 'beat', '--loglevel=info'],
         'redis': ['redis-server'],
         'postgresql': ['pg_ctl', '-D', 'data', 'restart'],
-        'milvus': ['docker', 'restart', 'milvus'],
-        'chroma': ['docker', 'restart', 'chroma'],
-        'minio': ['docker', 'restart', 'minio'],
+        'milvus': ['docker', 'restart', 'bid-milvus'],
+        'chroma': ['docker', 'restart', 'bid-chroma'],
+        'minio': ['docker', 'restart', 'bid-minio'],
         'ollama': ['systemctl', 'restart', 'ollama'],
+    }
+
+    WINDOWS_SERVICE_COMMANDS = {
+        'postgresql': {
+            'service_pattern': 'postgresql',
+            'display_name': 'PostgreSQL',
+        },
+        'redis': {
+            'service_pattern': 'Redis',
+            'display_name': 'Redis',
+        },
+    }
+
+    WINDOWS_PROCESS_COMMANDS = {
+        'celery_worker': {
+            'process_patterns': ['celery.*worker', 'celery_worker'],
+            'start_command': ['celery', '-A', 'config.celery', 'worker', '--loglevel=info', '--pool=solo', '-Q', 'celery,crawler,default', '--hostname=worker1@%h'],
+            'display_name': 'Celery Worker',
+        },
+        'celery_beat': {
+            'process_patterns': ['celery.*beat', 'celery_beat'],
+            'start_command': ['celery', '-A', 'config.celery', 'beat', '--loglevel=info'],
+            'display_name': 'Celery Beat',
+        },
     }
 
     @staticmethod
@@ -51,7 +76,7 @@ class ServiceRestartManager:
         return True, "可以重启"
 
     @staticmethod
-    def execute_restart(service) -> Dict[str, Any]:
+    def execute_restart(service, action_type: str = 'auto_restart', trigger_condition: str = None) -> Dict[str, Any]:
         """
         执行服务重启
         """
@@ -61,15 +86,18 @@ class ServiceRestartManager:
         if not can_restart:
             return {'success': False, 'message': reason}
 
+        if trigger_condition is None:
+            trigger_condition = f'连续失败{service.consecutive_failures}次'
+
         action_log = ServiceActionLog.objects.create(
             service=service,
-            action_type='auto_restart',
+            action_type=action_type,
             status='started',
-            trigger_condition=f'连续失败{service.consecutive_failures}次'
+            trigger_condition=trigger_condition
         )
 
         try:
-            restart_success = ServiceRestartManager._do_restart(service)
+            restart_success, error_msg = ServiceRestartManager._do_restart(service)
 
             if restart_success:
                 service.consecutive_failures = 0
@@ -90,11 +118,11 @@ class ServiceRestartManager:
                 return {'success': True, 'message': '重启成功'}
             else:
                 action_log.status = 'failed'
-                action_log.result_message = '重启执行返回失败'
+                action_log.result_message = error_msg or '重启执行返回失败'
                 action_log.completed_at = timezone.now()
                 action_log.save()
 
-                return {'success': False, 'message': '重启执行返回失败'}
+                return {'success': False, 'message': error_msg or '不支持此服务的重启'}
 
         except Exception as e:
             logger.error(f"重启服务失败 {service.name}: {str(e)}")
@@ -106,9 +134,243 @@ class ServiceRestartManager:
             return {'success': False, 'message': str(e)}
 
     @staticmethod
-    def _do_restart(service) -> bool:
+    def _do_restart(service) -> tuple[bool, str]:
         """
         执行实际的重启操作
+        返回 (success, error_message)
+        """
+        if platform.system() == 'Windows':
+            return ServiceRestartManager._do_restart_windows(service)
+        else:
+            return ServiceRestartManager._do_restart_linux(service)
+
+    @staticmethod
+    def _do_restart_windows(service) -> tuple[bool, str]:
+        """
+        Windows环境下的服务重启
+        使用 sc 命令管理Windows服务，或通过进程管理
+        """
+        service_name = service.name.lower()
+
+        for key, service_info in ServiceRestartManager.WINDOWS_SERVICE_COMMANDS.items():
+            if key in service_name:
+                display_name = service_info['display_name']
+                service_pattern = service_info['service_pattern']
+
+                windows_service_name = ServiceRestartManager._find_windows_service_name(service_pattern)
+                if not windows_service_name:
+                    logger.warning(f"未找到包含 '{service_pattern}' 的Windows服务")
+                    return False, f"未找到服务: {display_name}"
+
+                try:
+                    logger.info(f"Windows服务重启: {display_name} ({windows_service_name})")
+
+                    stop_result = subprocess.run(
+                        ['sc', 'stop', windows_service_name],
+                        capture_output=True,
+                        text=True,
+                        timeout=30
+                    )
+                    logger.info(f"sc stop result: returncode={stop_result.returncode}, stdout={stop_result.stdout}, stderr={stop_result.stderr}")
+
+                    import time
+                    time.sleep(2)
+
+                    start_result = subprocess.run(
+                        ['sc', 'start', windows_service_name],
+                        capture_output=True,
+                        text=True,
+                        timeout=30
+                    )
+                    logger.info(f"sc start result: returncode={start_result.returncode}, stdout={start_result.stdout}, stderr={start_result.stderr}")
+
+                    if start_result.returncode in [0, 1056]:
+                        return True, ""
+                    elif start_result.returncode == 5:
+                        logger.error("拒绝访问，需要管理员权限")
+                        return False, "需要管理员权限"
+                    else:
+                        if start_result.stdout and ('state' in start_result.stdout.lower() or 'running' in start_result.stdout.lower()):
+                            return True, ""
+                        return False, f"重启失败: {start_result.stderr or start_result.stdout}"
+                except subprocess.TimeoutExpired:
+                    logger.error(f"Windows服务重启命令超时: {display_name}")
+                    return False, f"重启超时: {display_name}"
+                except Exception as e:
+                    logger.error(f"Windows服务重启失败: {str(e)}")
+                    return False, f"重启失败: {str(e)}"
+
+        for key, process_info in ServiceRestartManager.WINDOWS_PROCESS_COMMANDS.items():
+            if key in service_name:
+                display_name = process_info['display_name']
+                process_patterns = process_info['process_patterns']
+                start_command = process_info['start_command']
+
+                try:
+                    logger.info(f"Windows进程重启: {display_name}")
+
+                    killed = ServiceRestartManager._kill_process_by_pattern(process_patterns)
+                    logger.info(f"进程终止结果: {killed}")
+
+                    import time
+                    time.sleep(2)
+
+                    started, start_msg = ServiceRestartManager._start_process(start_command)
+                    logger.info(f"进程启动结果: {started}, {start_msg}")
+
+                    return started, start_msg
+                except Exception as e:
+                    logger.error(f"Windows进程重启失败: {str(e)}")
+                    return False, f"重启失败: {str(e)}"
+
+        if 'docker' in service_name or 'milvus' in service_name or 'chroma' in service_name or 'minio' in service_name:
+            try:
+                check_docker = subprocess.run(
+                    ['docker', 'info'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if check_docker.returncode != 0:
+                    return False, "Docker未安装或未运行"
+            except FileNotFoundError:
+                return False, "Docker未安装"
+            except Exception as e:
+                return False, f"Docker不可用: {str(e)}"
+
+            try:
+                container_name = None
+                if 'milvus' in service_name:
+                    container_name = 'bid-milvus'
+                elif 'chroma' in service_name:
+                    container_name = 'bid-chroma'
+                elif 'minio' in service_name:
+                    container_name = 'bid-minio'
+                elif 'docker' in service_name:
+                    container_name = service_name.replace('docker_', '').replace('_docker', '')
+
+                logger.info(f"Windows Docker容器重启: {container_name}")
+                result = subprocess.run(
+                    ['docker', 'restart', container_name],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+                logger.info(f"docker restart result: returncode={result.returncode}, stdout={result.stdout}, stderr={result.stderr}")
+                if result.returncode == 0:
+                    return True, ""
+                return False, f"Docker重启失败: {result.stderr or result.stdout}"
+            except subprocess.TimeoutExpired:
+                logger.error(f"Docker容器重启超时: {container_name}")
+                return False, f"Docker重启超时: {container_name}"
+            except Exception as e:
+                logger.error(f"Docker容器重启失败: {str(e)}")
+                return False, f"Docker重启失败: {str(e)}"
+
+        logger.warning(f"未找到服务 {service.name} 的Windows重启方式")
+        return False, f"不支持的服务: {service.name}"
+
+    @staticmethod
+    def _find_windows_service_name(pattern: str) -> Optional[str]:
+        """
+        通过服务显示名称查找实际的服务名
+        使用 sc query 命令枚举服务
+        """
+        try:
+            result = subprocess.run(
+                ['sc', 'query', 'state=', 'all'],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode != 0:
+                return None
+
+            lines = result.stdout.split('\n')
+            current_service_name = None
+            current_display_name = None
+
+            for line in lines:
+                line = line.strip()
+                if line.startswith('SERVICE_NAME:'):
+                    current_service_name = line.split(':', 1)[1].strip()
+                elif line.startswith('DISPLAY_NAME:'):
+                    current_display_name = line.split(':', 1)[1].strip()
+                    if pattern.lower() in current_display_name.lower():
+                        logger.info(f"找到匹配服务: {current_display_name} -> {current_service_name}")
+                        return current_service_name
+
+            return None
+        except Exception as e:
+            logger.error(f"查找Windows服务名失败: {str(e)}")
+            return None
+
+    @staticmethod
+    def _kill_process_by_pattern(patterns: list) -> bool:
+        """
+        通过进程名模式终止进程
+        使用 taskkill /F /IM 或 wmic 命令
+        """
+        try:
+            import psutil
+            killed_any = False
+
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    proc_name = proc.info['name'] or ''
+                    cmdline = ' '.join(proc.info['cmdline']) if proc.info['cmdline'] else ''
+
+                    for pattern in patterns:
+                        import re
+                        if re.search(pattern, proc_name, re.IGNORECASE) or re.search(pattern, cmdline, re.IGNORECASE):
+                            logger.info(f"终止进程: {proc_name} (PID: {proc.info['pid']})")
+                            proc.kill()
+                            killed_any = True
+                            break
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+
+            return killed_any
+        except Exception as e:
+            logger.error(f"终止进程失败: {str(e)}")
+            return False
+
+    @staticmethod
+    def _start_process(command: list) -> tuple[bool, str]:
+        """
+        启动一个新进程
+        返回 (success, error_message)
+        """
+        try:
+            import subprocess
+            import os
+
+            logger.info(f"启动进程: {' '.join(command)}")
+
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+
+            process = subprocess.Popen(
+                command,
+                startupinfo=startupinfo,
+                cwd=os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+
+            logger.info(f"进程已启动，PID: {process.pid}")
+            return True, ""
+        except Exception as e:
+            logger.error(f"启动进程失败: {str(e)}")
+            return False, f"启动进程失败: {str(e)}"
+
+    @staticmethod
+    def _do_restart_linux(service) -> tuple[bool, str]:
+        """
+        Linux环境下的服务重启
+        返回 (success, error_message)
         """
         service_name = service.name.lower()
 
@@ -122,16 +384,18 @@ class ServiceRestartManager:
                         text=True,
                         timeout=60
                     )
-                    return result.returncode == 0
+                    if result.returncode == 0:
+                        return True, ""
+                    return False, f"重启失败: {result.stderr or result.stdout}"
                 except subprocess.TimeoutExpired:
                     logger.error(f"重启命令超时: {key}")
-                    return False
+                    return False, f"重启超时: {key}"
                 except Exception as e:
                     logger.error(f"执行重启命令失败: {str(e)}")
-                    return False
+                    return False, f"重启失败: {str(e)}"
 
         logger.warning(f"未找到服务 {service.name} 的重启命令")
-        return False
+        return False, f"不支持的服务: {service.name}"
 
     @staticmethod
     def _resolve_existing_alerts(service):

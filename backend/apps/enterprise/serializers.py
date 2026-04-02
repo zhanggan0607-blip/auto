@@ -450,21 +450,35 @@ class EnterpriseKeyPersonnelSerializer(serializers.ModelSerializer):
     labor_contract_url = serializers.SerializerMethodField()
     similar_performance_proof_url = serializers.SerializerMethodField()
     id_number_masked = serializers.SerializerMethodField()
-    
+
+    FILE_FIELDS = [
+        'builder_certificate_file', 'safety_certificate_b_file',
+        'engineer_certificate_file', 'social_security_proof',
+        'no_ongoing_commitment', 'labor_contract', 'similar_performance_proof'
+    ]
+
     class Meta:
         model = EnterpriseKeyPersonnel
         fields = '__all__'
         read_only_fields = ['created_at', 'updated_at', 'certificate_status', 'personnel_id']
-    
+
+    def validate(self, attrs):
+        """
+        对于文件字段，如果传入的是字符串（URL）而不是文件对象，则移除该字段（保留原有值）
+        """
+        for field in self.FILE_FIELDS:
+            if field in attrs and isinstance(attrs[field], str):
+                attrs.pop(field)
+        return attrs
+
     def get_id_number_masked(self, obj):
         """
         获取脱敏后的身份证号
         """
         if obj.id_number:
-            decrypted = AESCrypto.decrypt(obj.id_number) if obj.id_number else ''
-            return mask_sensitive_data(decrypted, 'id_number')
+            return mask_sensitive_data(obj.id_number, 'id_number')
         return ''
-    
+
     def get_days_to_expiry(self, obj):
         """获取证书到期天数"""
         if obj.expiry_date:
@@ -507,27 +521,6 @@ class EnterpriseKeyPersonnelSerializer(serializers.ModelSerializer):
         if obj.similar_performance_proof:
             return obj.similar_performance_proof.url
         return None
-    
-    def to_internal_value(self, data):
-        """
-        预处理输入数据，加密身份证号
-        """
-        data = data.copy() if hasattr(data, 'copy') else dict(data)
-        
-        if data.get('id_number'):
-            data['id_number'] = AESCrypto.encrypt(data['id_number'])
-        
-        return super().to_internal_value(data)
-    
-    def to_representation(self, instance):
-        """
-        输出时解密身份证号
-        """
-        data = super().to_representation(instance)
-        if data.get('id_number'):
-            decrypted = AESCrypto.decrypt(data['id_number'])
-            data['id_number'] = decrypted
-        return data
 
 
 class EnterpriseKeyPersonnelListSerializer(serializers.ModelSerializer):
@@ -539,7 +532,14 @@ class EnterpriseKeyPersonnelListSerializer(serializers.ModelSerializer):
     certificate_status_display = serializers.CharField(source='get_certificate_status_display', read_only=True)
     title_level_display = serializers.CharField(source='get_title_level_display', read_only=True)
     days_to_expiry = serializers.SerializerMethodField()
-    
+    builder_certificate_file_url = serializers.SerializerMethodField()
+    safety_certificate_b_file_url = serializers.SerializerMethodField()
+    engineer_certificate_file_url = serializers.SerializerMethodField()
+    social_security_proof_url = serializers.SerializerMethodField()
+    no_ongoing_commitment_url = serializers.SerializerMethodField()
+    labor_contract_url = serializers.SerializerMethodField()
+    similar_performance_proof_url = serializers.SerializerMethodField()
+
     class Meta:
         model = EnterpriseKeyPersonnel
         fields = [
@@ -549,15 +549,53 @@ class EnterpriseKeyPersonnelListSerializer(serializers.ModelSerializer):
             'expiry_date', 'days_to_expiry', 'issuing_authority', 'issuing_authority_full',
             'title_level', 'title_level_display', 'officer_type', 'officer_type_display',
             'is_registered_locally', 'social_security_code', 'professional_years',
-            'certificate_status', 'certificate_status_display', 'is_available', 'phone'
+            'certificate_status', 'certificate_status_display', 'is_available', 'phone',
+            'builder_certificate_file_url', 'safety_certificate_b_file_url',
+            'engineer_certificate_file_url', 'social_security_proof_url',
+            'no_ongoing_commitment_url', 'labor_contract_url', 'similar_performance_proof_url'
         ]
-    
+
     def get_days_to_expiry(self, obj):
         """获取证书到期天数"""
         if obj.expiry_date:
             from datetime import date
             delta = obj.expiry_date - date.today()
             return delta.days
+        return None
+
+    def get_builder_certificate_file_url(self, obj):
+        if obj.builder_certificate_file:
+            return obj.builder_certificate_file.url
+        return None
+
+    def get_safety_certificate_b_file_url(self, obj):
+        if obj.safety_certificate_b_file:
+            return obj.safety_certificate_b_file.url
+        return None
+
+    def get_engineer_certificate_file_url(self, obj):
+        if obj.engineer_certificate_file:
+            return obj.engineer_certificate_file.url
+        return None
+
+    def get_social_security_proof_url(self, obj):
+        if obj.social_security_proof:
+            return obj.social_security_proof.url
+        return None
+
+    def get_no_ongoing_commitment_url(self, obj):
+        if obj.no_ongoing_commitment:
+            return obj.no_ongoing_commitment.url
+        return None
+
+    def get_labor_contract_url(self, obj):
+        if obj.labor_contract:
+            return obj.labor_contract.url
+        return None
+
+    def get_similar_performance_proof_url(self, obj):
+        if obj.similar_performance_proof:
+            return obj.similar_performance_proof.url
         return None
 
 

@@ -48,8 +48,7 @@ class MilvusService:
         self._connected = False
         self._collection = None
         self._embedding_service = None
-
-        self._initialize()
+        self._initialized = True
 
     def _initialize(self):
         """初始化Milvus连接"""

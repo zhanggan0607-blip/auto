@@ -216,7 +216,7 @@ class UserListView(generics.ListAPIView):
 
     def get_queryset(self):
         """
-        支持搜索过滤
+        支持搜索过滤，默认只显示启用用户
         """
         queryset = super().get_queryset()
         username = self.request.query_params.get('username')
@@ -229,6 +229,8 @@ class UserListView(generics.ListAPIView):
             queryset = queryset.filter(role=role)
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
+        else:
+            queryset = queryset.filter(is_active=True)
 
         return queryset
 

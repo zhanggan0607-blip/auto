@@ -84,7 +84,7 @@ export const enterpriseApi = {
   },
   
   updateKeyPersonnel(id, data) {
-    return request.put(`${BASE_URL}/key-personnel/${id}/`, data)
+    return request.patch(`${BASE_URL}/key-personnel/${id}/`, data)
   },
   
   deleteKeyPersonnel(id) {

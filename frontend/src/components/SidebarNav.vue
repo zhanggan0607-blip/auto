@@ -76,11 +76,19 @@
               v-for="service in services"
               :key="service.name"
               class="service-dot"
-              :class="`status-${service.status}`"
-              :title="`${service.name}: ${service.message}`"
+              :class="{
+                [`status-${service.status}`]: true,
+                'is-restarting': restartingService === service.name,
+                'is-clickable': isServiceRestartable(service)
+              }"
+              :title="`${service.name}: ${service.message}${isServiceRestartable(service) ? ' (点击重启)' : ''}`"
+              @click="isServiceRestartable(service) && handleRestart(service)"
             >
-              <el-tooltip :content="`${service.name}: ${service.message}`" placement="right">
-                <el-icon :size="10"><component :is="getServiceIcon(service.status)" /></el-icon>
+              <el-tooltip :content="`${service.name}: ${service.message}${isServiceRestartable(service) ? ' (点击重启)' : ''}`" placement="right">
+                <el-icon :size="10">
+                  <Loading v-if="restartingService === service.name" />
+                  <component v-else :is="getServiceIcon(service.status)" />
+                </el-icon>
               </el-tooltip>
             </div>
           </div>
@@ -111,8 +119,10 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowRight, Bell, CircleCheck, CircleClose, Refresh, QuestionFilled, Warning } from '@element-plus/icons-vue'
+import { ArrowRight, Bell, CircleCheck, CircleClose, Refresh, QuestionFilled, Warning, Loading } from '@element-plus/icons-vue'
+import { ElMessageBox, ElMessage } from 'element-plus'
 import { getSystemServices } from '@/api/system'
+import { restartService } from '@/api/monitor'
 
 const props = defineProps({
   isCollapse: {
@@ -130,6 +140,8 @@ const router = useRouter()
 
 const services = ref([])
 const loadingServices = ref(false)
+const restartingService = ref(null)
+const backendOnline = ref(true)
 
 const getServiceIcon = (status) => {
   if (status === 'running') return CircleCheck
@@ -139,6 +151,7 @@ const getServiceIcon = (status) => {
 }
 
 const overallStatus = computed(() => {
+  if (!backendOnline.value) return 'offline'
   const statuses = services.value.map(s => s.status)
   if (statuses.includes('error')) return 'unhealthy'
   if (statuses.includes('stopped') || statuses.includes('degraded')) return 'degraded'
@@ -151,7 +164,8 @@ const overallStatusType = computed(() => {
     'healthy': 'success',
     'degraded': 'warning',
     'unhealthy': 'danger',
-    'unknown': 'info'
+    'unknown': 'info',
+    'offline': 'danger'
   }
   return typeMap[overallStatus.value] || 'info'
 })
@@ -161,28 +175,36 @@ const overallStatusText = computed(() => {
     'healthy': '全部正常',
     'degraded': '部分异常',
     'unhealthy': '服务异常',
-    'unknown': '未知'
+    'unknown': '未知',
+    'offline': '后端离线'
   }
   return textMap[overallStatus.value] || '未知'
 })
 
 const getOverallStatusIcon = () => {
+  if (overallStatus.value === 'offline') return CircleClose
   if (overallStatus.value === 'healthy') return CircleCheck
   if (overallStatus.value === 'unhealthy') return CircleClose
   if (overallStatus.value === 'degraded') return Warning
   return QuestionFilled
 }
 
+const isServiceRestartable = (service) => {
+  return service.status === 'error' || service.status === 'stopped' || service.status === 'degraded'
+}
+
 const fetchServices = async () => {
   try {
     loadingServices.value = true
     const response = await getSystemServices()
-    if (response.status === 200 || response.status === 201) {
-      const data = response.data || response
-      services.value = data.services || []
+    const data = response?.data || response
+    if (data && Array.isArray(data.services)) {
+      services.value = data.services
+      backendOnline.value = true
     }
   } catch (error) {
     console.error('获取服务状态失败:', error)
+    backendOnline.value = false
   } finally {
     loadingServices.value = false
   }
@@ -190,6 +212,30 @@ const fetchServices = async () => {
 
 const refreshServices = () => {
   fetchServices()
+}
+
+const handleRestart = async (service) => {
+  if (!service.id) {
+    ElMessage.warning('该服务未在监控数据库中注册，无法远程重启')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定要重启 ${service.name} 吗？`,
+      '重启服务',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+    )
+    restartingService.value = service.name
+    await restartService(service.id)
+    ElMessage.success('重启命令已发送')
+    await fetchServices()
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('重启服务失败:', error)
+    }
+  } finally {
+    restartingService.value = null
+  }
 }
 
 let servicesInterval = null
@@ -615,6 +661,19 @@ watch(() => route.path, () => {
       &.status-unknown {
         color: var(--sidebar-text);
         background: rgba(255, 255, 255, 0.05);
+      }
+
+      &.is-clickable {
+        cursor: pointer;
+
+        &:hover {
+          transform: scale(1.2);
+          box-shadow: 0 0 8px currentColor;
+        }
+      }
+
+      &.is-restarting {
+        animation: spin 1s linear infinite;
       }
     }
 

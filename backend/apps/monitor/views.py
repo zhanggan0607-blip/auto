@@ -90,7 +90,11 @@ class MonitoredServiceViewSet(viewsets.ModelViewSet):
         if not can_restart:
             return Response({'error': reason}, status=status.HTTP_400_BAD_REQUEST)
 
-        result = ServiceRestartManager.execute_restart(service)
+        result = ServiceRestartManager.execute_restart(
+            service,
+            action_type='manual_restart',
+            trigger_condition='手动触发重启'
+        )
 
         if result['success']:
             service.refresh_from_db()
@@ -100,7 +104,10 @@ class MonitoredServiceViewSet(viewsets.ModelViewSet):
                 'service': serializer.data
             })
         else:
-            return Response({'error': result['message']}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            error_msg = result.get('message', '重启失败')
+            if '不支持' in error_msg or '未找到' in error_msg or '无法' in error_msg or '未安装' in error_msg or '重启执行返回失败' in error_msg:
+                return Response({'error': error_msg}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': error_msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'])
     def categories(self, request):

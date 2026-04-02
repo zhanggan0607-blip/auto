@@ -333,8 +333,8 @@ const getActionName = (type) => {
 const fetchAutomationStats = async () => {
   try {
     const res = await request.get('/v1/openclaw/automation/statistics/')
-    if (res.data?.success) {
-      const data = res.data.data || {}
+    if (res.success && res.data) {
+      const data = res.data
 
       todayStats.value = {
         crawled: data.crawled_today || 0,

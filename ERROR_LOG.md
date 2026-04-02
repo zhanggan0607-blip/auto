@@ -222,14 +222,60 @@
 | E197 | monitor数据库迁移文件错误 | 0001_initial.py中AddIndex操作使用model_name='servicalert'但实际模型名是'servicealert'，导致migrate失败，monitor_dashboard返回503 | 已解决 | 2026-03-29 |
 | E198 | MonitoredService.status是property不是字段 | MonitoredService模型的status是@property，Django不会生成get_status_display()方法，但__str__和views.py中调用了该方法，导致500错误 | 已解决 | 2026-03-29 |
 | E199 | 前端用户创建API路径错误 | userAdmin.js的create方法调用POST /v1/auth/，但该路由对应UserListView（ListAPIView，只支持GET），应调用POST /v1/auth/register/，导致405错误 | 已解决 | 2026-03-30 |
-| F016 | 实时服务监控与自动恢复系统 | 新增完整的monitor应用模块，包含MonitoredService/ServiceHealthRecord/ServiceAlert/ServiceActionLog数据模型，CeleryHealthChecker健康检查，支持HTTP/TCP/进程/Celery多种检测方式，自动重启机制（冷却策略），钉钉告警通知，24小时历史记录 | 已完成 | 2026-03-29 |
+| E200 | vue.config.js代理配置与后端端口不匹配 | 前端devServer.port=8081，proxy.target=http://localhost:8000，但后端实际运行在8081，导致/api请求全部失败返回500 | 已解决 | 2026-03-30 |
+| E201 | WebSocket连接失败（Vite HMR） | ws://localhost:8081/ws 连接失败是Vite开发服务器HMR客户端问题，不是应用问题 | 已确认 | 2026-03-30 |
+| E202 | key-personnel保存400错误 | CompanyInfo.vue保存关键人员时返回400 Bad Request，后端验证失败；E203修复PUT->PATCH方法，E207修复字段长度问题 | 已解决 | 2026-03-30 |
+| E203 | key-personnel更新方法错误 | enterprise.js的updateKeyPersonnel使用PUT方法，但DRF ViewSet的update默认是PATCH，导致400错误 | 已解决 | 2026-03-30 |
+| E204 | 前端API响应数据处理不一致 | SidebarNav、ServiceActionLogList、UserManagement等组件未正确处理不同格式的API响应（直接返回vs包装在data中），导致数据渲染错误 | 已解决 | 2026-03-30 |
+| E205 | 前端request.js未正确处理DRF字段级验证错误 | DRF返回400时格式为{field: [errors]}，但request.js只读取.message导致错误信息显示不正确 | 已解决 | 2026-03-30 |
+| E206 | 后端UnifiedResponse返回的errors字段未被前端正确解析 | 后端返回{success, code, message, errors}格式，其中errors包含详细字段错误，但前端只检查detail和message | 已解决 | 2026-03-30 |
+| E207 | id_number字段max_length过小导致加密后验证失败 | 身份证号加密后字符串变长(超过20字符)，但模型和序列化器max_length=20，导致验证失败 | 已解决 | 2026-03-30 |
+| E208 | 身份证号取消加密改为明文存储 | 用户要求取消身份证号加密以简化处理，明文存储身份证号（长度18位） | 已解决 | 2026-03-30 |
+| E209 | 导航栏服务重启API返回undefined | system_services_status返回的services数组中每项没有id字段，导致restartService调用时传入undefined，API返回404 | 已解决 | 2026-03-30 |
+| E210 | 手动重启服务action_type错误 | restart_manager.py的execute_restart方法固定使用action_type='auto_restart'，手动重启时应使用'manual_restart' | 已解决 | 2026-03-30 |
+| E211 | 手动重启API未传递action_type参数 | views.py中手动调用restart时未传递action_type参数给execute_restart，导致无法区分手动/自动重启 | 已解决 | 2026-03-30 |
+| E212 | request.js未解析500错误的详情 | 500错误处理只显示通用'服务器错误'，未解析后端返回的error字段 | 已解决 | 2026-03-30 |
+| E213 | PATCH请求发送FormData时Content-Type错误 | 前端request.js的patch方法在发送FormData时未正确设置Content-Type为multipart/form-data，导致后端无法解析文件字段，返回400错误"提交的数据不是一个文件" | 已解决 | 2026-03-30 |
+| E214 | 人员文件编辑时URL未正确传递和预览 | 人员编辑时API返回的文件URL未填充到表单，且PDF预览因X-Frame-Options安全限制被浏览器阻止 | 已解决 | 2026-03-30 |
+| E215 | 资质证书PDF预览未使用blob方式 | 资质证书上传功能中PDF预览直接使用URL会因X-Frame-Options被阻止，需要用fetch+blob方式 | 已解决 | 2026-03-30 |
+| E216 | 资质证书文件名URL编码未解码 | 编辑资质时文件名显示URL编码格式（如%E5%BE%90%E9%98%B3），未使用decodeURIComponent解码 | 已解决 | 2026-03-30 |
+| E217 | 前端密码验证规则不完整 | 前端UserManagement.vue的password规则只有长度验证，缺少字母和数字的正则验证，导致用户输入纯数字密码时后端返回400错误 | 已解决 | 2026-03-30 |
+| E218 | 用户删除为软删除且列表不过滤 | UserDetailView.destroy()是软删除（is_active=False），UserListView默认显示所有用户包括禁用的，导致删除后用户仍在列表显示 | 已解决 | 2026-03-30 |
+| E219 | Celery Beat调度器未运行导致定时任务未执行 | 2026-03-30两个定时采集任务未生成日志，原因是Celery Beat调度器未启动；虽然Worker在运行，但Beat服务未启动导致定时任务未被触发执行 | 已确认 | 2026-03-30 |
+| E220 | statistics API效率指标硬编码 | 自动化监控API的自动化率、平均处理时长、时间节省、自愈率等指标为硬编码值，非从实际数据计算 | 已解决 | 2026-03-30 |
+| E221 | statistics API中标数据来源错误 | 今日中标统计从TenderProject.status='won'查询，但实际中标信息存储在BidResult.result_type='win' | 已解决 | 2026-03-30 |
+| E222 | CrawlSchedule与PeriodicTask的Crontab不一致 | 上海政府采购采集计划的CrawlSchedule crontab为'35 01'但PeriodicTask crontab为'35 20'，政府采购网采集'25 02' vs '25 20'，导致定时任务按错误时间执行 | 已解决 | 2026-03-30 |
+| E223 | Celery Worker启动时未加载crawler.tasks模块 | 使用celery -A config.celery worker启动时，crawler.tasks模块未被自动发现，scheduled_crawl_with_match等任务不可用 | 已解决 | 2026-03-30 |
+| E224 | Celery Worker未监听crawler队列 | celery worker默认只监听celery队列，但crawler.tasks.*任务被路由到crawler队列，导致任务堆积无法执行 | 已解决 | 2026-03-30 |
+| E225 | 前端代理ECONNREFUSED导致500错误 | 前端Vite开发服务器代理请求到后端时出现ECONNREFUSED，后端API本身正常工作 | 已确认 | 2026-03-30 |
+| E226 | restart_manager.py不支持Windows服务管理 | _do_restart方法中的重启命令(pg_ctl/redis-server/systemctl)是Linux命令，在Windows上返回False导致重启失败 | 已解决 | 2026-03-30 |
+| E227 | Milvus连接阻塞导致API超时 | MilvusService.__init__在模块加载时同步连接Milvus服务器（5秒超时×2次），导致system/services API响应18秒 | 已解决 | 2026-03-31 |
+| E228 | system/services API性能问题 | API检查所有服务（Celery、Chroma、MinIO、Ollama等）均使用同步阻塞方式，总响应时间=所有超时之和，导致前端30秒轮询超时 | 已解决 | 2026-03-31 |
+| E229 | 前端无法检测后端离线状态 | SidebarNav.vue的fetchServices捕获错误但只输出console.error，未设置任何UI状态提示用户后端已离线 | 已解决 | 2026-03-31 |
+| E230 | system/services API缓存无效 | API在Django开发服务器单线程环境下，缓存命中也需等待线程空闲，实际响应时间6-18秒交替出现 | 已优化 | 2026-03-31 |
+| F018 | 企业页面文件上传预览功能 | 文档上传对话框和人员表单中的文件上传支持选择后立即预览，支持图片和PDF格式 | 已完成 | 2026-03-30 |
+| F019 | 企业页面图片浏览器组件 | 新建功能强大的ImageViewer组件，支持缩略图网格、缩放、旋转、拖拽、多图切换，完美适配移动端 | 已完成 | 2026-03-30 |
+| F020 | 内容识别Agent (ContentRecognitionAgent) | 新增专业的内容识别Agent，对爬取内容进行多维度分析、关键业务数据提取、数据质量校验；集成到采集流程自动执行；提供可配置的数据提取规则、异常处理机制 | 已完成 | 2026-03-30 |
+| F021 | 资质信息证书文件上传 | 企业详情页资质信息Tab新增证书文件上传功能，支持PDF和图片格式上传、在线预览、删除；资质列表显示"证书文件"列可直接预览 | 已完成 | 2026-03-30 |
+| F022 | 日志详情页面执行时间精确显示 | CrawlScheduleLog.duration字段从IntegerField改为FloatField，tasks.py中duration计算改用total_seconds()，前端formatDuration函数智能格式化（毫秒/秒/分秒） | 已完成 | 2026-03-31 |
+| F023 | 前端后端离线状态检测 | SidebarNav.vue添加backendOnline状态，后端离线时显示"后端离线"红色标签；system/services API添加进程内内存缓存+Redis缓存双重缓存机制 | 已完成 | 2026-03-31 |
+| E231 | 服务重启API对不支持的重启返回500 | 服务重启对不支持的Windows服务返回500而非400，因为_do_restart返回(False,"")导致返回通用错误消息 | 已解决 | 2026-03-31 |
+| E232 | 服务重启时Docker未安装 | Windows环境下重启Milvus/Chroma/MinIO等Docker容器服务时，返回400错误"Docker未安装"，因为这些服务依赖Docker但Windows未安装 | 已确认 | 2026-04-01 |
+| E233 | docker-compose.yml配置错误：container_name与replicas冲突 | docker-compose.yml中frontend/backend/fastapi/celery-worker/celery-crawler/celery-beat等服务同时设置了container_name和deploy.replicas，导致"can't set container_name and X as container name must be unique"错误 | 已解决 | 2026-04-02 |
+| E234 | Dockerfile.fastapi COPY路径错误 | Dockerfile.fastapi中COPY路径使用backend/xxx但build context是./backend，导致"/backend/utils": not found构建失败 | 已解决 | 2026-04-02 |
+| E235 | backend目录缺少.dockerignore | backend目录没有.dockerignore文件，导致构建上下文传输了node_modules和__pycache__等大文件（ celery-crawler传输了298MB+），严重影响构建速度 | 已解决 | 2026-04-02 |
+| E236 | Docker Desktop无法启动（日志文件被锁定） | Docker Desktop无法启动，错误："Not allow operate files: C:\Users\ZhangGan\AppData\Local\Docker\log\host\Docker Desktop.exe.log"；日志文件被其他进程锁定 | 已确认 | 2026-04-02 |
+| E237 | DOCKER_HOST环境变量配置错误 | Docker Desktop已运行但docker命令失败，错误："dial tcp [::1]:2375: connectex: No connection could be made"；因为DOCKER_HOST环境变量设置为tcp://localhost:2375，但Docker Desktop使用npipe管道连接 | 已解决 | 2026-04-02 |
 
-----
-*最后更新: 2026-03-30*
-*本次更新：新增 E199 错误记录，修复用户创建API路径错误导致的405错误*
+*本次更新：2026-04-02*
+*本次更新：E233-E237 Docker相关配置错误修复*
+* E233: 移除container_name配置（与replicas冲突）
+* E234: 修复Dockerfile.fastapi的COPY路径
+* E235: 添加backend/.dockerignore文件
+* E236: Docker Desktop日志文件锁定问题（需手动处理）
+* E237: 清除DOCKER_HOST环境变量，使用docker context切换
 
 ---
-
 ## E170: ccgp.gov.cn URL路径缺失
 
 **发生时间**: 2026-03-29
@@ -512,8 +558,113 @@ TenderService.invalidate_tender_cache() ← 清除缓存
 **相关文件**:
 - `backend/apps/tenders/services.py`
 - `backend/apps/tenders/views.py`
-- `backend/apps/tenders/urls.py`
+
+
+---
+
+## F020: 内容识别Agent (ContentRecognitionAgent)
+
+**完成时间**: 2026-03-30
+
+**功能描述**:
+- 对爬取获取的各类数据进行精准识别与结构化处理
+- 对爬取内容进行多维度分析，提取关键业务数据
+- 按照预设的数据模型进行标准化整理与存储
+- 提供可配置的数据提取规则、异常处理机制和数据质量校验
+
+**实现组件**:
+
+1. **Agent类** (`openclaw/agents/content_recognition_agent.py`)
+   - `ContentRecognitionAgent` - 单条内容识别Agent
+   - `BatchContentRecognitionAgent` - 批量内容识别Agent
+   - 支持招标公告、企业信息、文档、通用内容等多种类型
+
+2. **数据模型** (`apps/crawler/models.py`)
+   - `ContentRecognitionRule` - 内容识别规则配置
+   - `RecognizedContent` - 已识别内容存储
+
+3. **序列化器** (`apps/crawler/serializers.py`)
+   - `ContentRecognitionRuleSerializer`
+   - `RecognizedContentSerializer`
+   - `RecognizedContentListSerializer`
+   - `BatchRecognizeSerializer`
+
+4. **API视图** (`apps/crawler/views.py`)
+   - `ContentRecognitionRuleViewSet` - 识别规则CRUD + 测试
+   - `RecognizedContentViewSet` - 已识别内容管理
+   - `batch_recognize` - 批量识别
+   - `quality_stats` - 质量统计
+   - `reprocess_low_quality` - 低质量内容重新识别
+
+5. **Celery任务集成** (`crawler/tasks.py`)
+   - `scheduled_crawl_with_match` 新增内容识别步骤
+   - 采集完成后自动执行内容识别
+
+**数据质量校验**:
+- 必填字段检查
+- 数据格式验证（日期、金额、信用代码等）
+- 质量评分 0-100 分
+- 质量等级 A/B/C/D 四级
+
+**识别类型**:
+- `tender` - 招标公告：标题、编号、采购人、代理机构、预算金额、截止日期等
+- `enterprise` - 企业信息：企业名称、信用代码、法人代表、注册资本等
+- `document` - 文档
+- `general` - 通用内容
+
+**API路由**:
+- `/api/v1/crawler/recognition-rules/` - 识别规则管理
+- `/api/v1/crawler/recognized/` - 已识别内容管理
+
+**相关文件**:
+- `backend/openclaw/agents/content_recognition_agent.py`
+- `backend/apps/crawler/models.py`
+- `backend/apps/crawler/serializers.py`
+- `backend/apps/crawler/views.py`
+- `backend/apps/crawler/urls.py`
 - `backend/crawler/tasks.py`
+
+
+---
+
+## F021: 资质信息证书文件上传
+
+**完成时间**: 2026-03-30
+
+**功能描述**:
+- 企业详情页资质信息Tab新增证书文件上传功能
+- 支持PDF和图片格式上传
+- 在线预览已上传的证书文件
+- 删除已上传的证书文件
+- 资质列表新增"证书文件"列，可直接点击预览
+
+**实现内容**:
+
+1. **前端表单** (`CompanyInfo.vue`)
+   - 资质表单新增"证书文件"上传组件
+   - 使用 `el-upload` 组件，`auto-upload="false"` 手动上传
+   - 支持 `.pdf`, `.jpg`, `.jpeg`, `.png` 格式
+   - 文件上传后显示文件名，可预览和删除
+
+2. **表单处理函数**
+   - `handleQualificationFileChange` - 处理文件选择
+   - `handleQualificationFileRemove` - 处理文件删除
+   - `previewQualificationFile` - 预览已选择的文件
+   - `previewQualificationFileFromList` - 预览列表中的文件
+
+3. **保存逻辑**
+   - 有文件时使用 `FormData` 上传
+   - 无文件时使用普通JSON提交
+   - 编辑时保留原文件URL
+
+4. **资质列表**
+   - 新增"证书文件"列
+   - 有文件显示"查看"按钮，无文件显示"-"
+
+**相关文件**:
+- `frontend/src/views/CompanyInfo.vue`
+- `frontend/src/api/enterprise.js`
+
 
 ---
 
@@ -8376,6 +8527,359 @@ services.value = response.services || []
 
 ---
 
+### E197: monitor数据库迁移文件错误
+
+**发生时间**: 2026-03-30
+
+**错误类型**: Django数据库迁移错误
+
+**错误描述**:
+- monitor应用的0001_initial.py中AddIndex操作使用`model_name='servicalert'`
+- 但实际模型名是`servicealert`（两个l不是i）
+- 导致`python manage.py migrate monitor`失败
+- monitor_dashboard接口返回503错误
+
+**发生场景**:
+- 执行`python manage.py migrate monitor`时
+- 访问`/api/v1/monitor/dashboard/`时返回503
+
+**原因分析**:
+- 迁移文件中的模型名拼写错误：`servicalert`应为`servicealert`
+
+**解决方案**:
+- 修正迁移文件中AddIndex的model_name参数
+
+**预防措施**:
+- 创建迁移文件后检查模型名拼写是否正确
+
+**相关文件**:
+- `backend/apps/monitor/migrations/0001_initial.py`
+
+---
+
+### E198: MonitoredService.status是property不是字段
+
+**发生时间**: 2026-03-30
+
+**错误类型**: Django模型属性访问错误
+
+**错误描述**:
+- MonitoredService模型的status是@property装饰的方法，不是数据库字段
+- Django不会为@property生成`get_status_display()`方法
+- 但__str__和views.py中调用了该方法，导致500错误
+
+**发生场景**:
+- Django Admin中查看MonitoredService列表时
+- 访问monitor相关API时
+
+**原因分析**:
+- 使用@property装饰器定义的属性不能在serializer中使用get_FOO_display()方法
+
+**解决方案**:
+- 修改serializer使用property方法获取status显示值
+
+**预防措施**:
+- 不要对需要序列化显示的属性使用@property
+
+**相关文件**:
+- `backend/apps/monitor/models.py`
+- `backend/apps/monitor/serializers.py`
+
+---
+
+### E199: 前端用户创建API路径错误
+
+**发生时间**: 2026-03-30
+
+**错误类型**: API路由错误
+
+**错误描述**:
+- userAdmin.js的create方法调用`POST /v1/auth/`
+- 但该路由对应UserListView（ListAPIView，只支持GET）
+- 应调用`POST /v1/auth/register/`
+- 导致405 Method Not Allowed错误
+
+**发生场景**:
+- 前端创建用户时
+
+**原因分析**:
+- 注册用户应使用专门的注册API，不是用户列表API
+
+**解决方案**:
+```javascript
+// 错误
+create(data) {
+  return request.post('/v1/auth/', data)
+}
+
+// 正确
+create(data) {
+  return request.post('/v1/auth/register/', data)
+}
+```
+
+**预防措施**:
+- 创建用户使用注册API，不是用户列表API
+
+**相关文件**:
+- `frontend/src/api/userAdmin.js`
+
+---
+
+### E200: vue.config.js代理配置与后端端口不匹配
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 前端代理配置错误
+
+**错误描述**:
+- 前端devServer.port=8081，proxy.target=http://localhost:8000
+- 但后端实际运行在8081端口
+- 导致所有/api请求全部失败返回500
+
+**发生场景**:
+- 前端登录时
+- 所有前端调用后端API时
+
+**原因分析**:
+- vue.config.js中devServer.port=8081与proxy.target的端口不一致
+- 前端请求被代理到错误的端口
+
+**解决方案**:
+- 方案1：后端改到8000，前端保持8081，proxy指向8000（当前配置）
+- 方案2：前端改到8080，后端保持8081，proxy指向8081
+
+**预防措施**:
+- 启动服务前确认各服务端口配置一致性
+- 后端端口变更后及时更新vue.config.js的proxy配置
+
+**相关文件**:
+- `frontend/vue.config.js`
+
+---
+
+### E201: WebSocket连接失败（Vite HMR）
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 前端开发环境问题
+
+**错误描述**:
+WebSocket连接 `ws://localhost:8081/ws` 失败，是 Vite 开发服务器的 HMR（Hot Module Replacement）客户端问题，不是应用本身的问题。
+
+**发生场景**:
+- 前端开发环境启动后
+- 浏览器控制台显示 WebSocket 连接错误
+
+**解决方案**:
+- 确认这是 Vite 开发环境的已知行为，不影响实际应用功能
+- 生产环境不会有此问题
+
+**预防措施**:
+- 此为开发环境正常现象，无需处理
+
+---
+
+### E202: key-personnel保存400错误
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 后端验证错误
+
+**错误描述**:
+CompanyInfo.vue 保存关键人员时返回 400 Bad Request，后端验证失败。
+
+**发生场景**:
+- 企业详情页保存关键人员信息时
+
+**原因分析**:
+- 合并了多个问题：E203（PUT方法错误）、E207（字段长度问题）
+
+**解决方案**:
+- E203: 将 PUT 改为 PATCH 方法
+- E207: 增加 id_number 字段长度到 50
+
+**相关文件**:
+- `frontend/src/views/CompanyInfo.vue`
+- `backend/apps/enterprise/serializers.py`
+
+---
+
+### E203: key-personnel更新方法错误
+
+**发生时间**: 2026-03-30
+
+**错误类型**: API方法错误
+
+**错误描述**:
+enterprise.js 的 updateKeyPersonnel 使用 PUT 方法，但 DRF ViewSet 的 update 默认是 PATCH，导致 400 错误。
+
+**发生场景**:
+- 更新企业关键人员信息时
+
+**解决方案**:
+```javascript
+// 错误
+updateKeyPersonnel(id, data) {
+  return request.put(`${BASE_URL}/key-personnel/${id}/`, data)
+}
+
+// 正确
+updateKeyPersonnel(id, data) {
+  return request.patch(`${BASE_URL}/key-personnel/${id}/`, data)
+}
+```
+
+**预防措施**:
+- DRF ViewSet 默认 update 方法是 PATCH，不是 PUT
+
+**相关文件**:
+- `frontend/src/api/enterprise.js`
+
+---
+
+### E204: 前端API响应数据处理不一致
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 前端数据解析错误
+
+**错误描述**:
+SidebarNav、ServiceActionLogList、UserManagement 等组件未正确处理不同格式的 API 响应（直接返回 vs 包装在 data 中），导致数据渲染错误。
+
+**发生场景**:
+- 多个页面加载数据时
+
+**原因分析**:
+- 后端不同 API 返回格式不统一
+- 有的直接返回数组，有的包装在 `{data: {list: []}}` 中
+
+**解决方案**:
+统一数据解析逻辑，提供多层后备：
+```javascript
+let list = res?.data?.results || res?.results || res?.data?.list || res?.list || res?.data || []
+```
+
+**预防措施**:
+- 前端组件统一使用多层后备解析数据
+
+**相关文件**:
+- `frontend/src/components/SidebarNav.vue`
+- `frontend/src/views/ServiceActionLogList.vue`
+- `frontend/src/views/UserManagement.vue`
+
+---
+
+### E205: 前端request.js未正确处理DRF字段级验证错误
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 前端错误提示不准确
+
+**错误描述**:
+DRF 返回 400 时格式为 `{field: [errors]}`，但 request.js 只读取 `.message` 导致错误信息显示不正确。
+
+**发生场景**:
+- 表单提交触发 DRF 字段验证错误时
+
+**解决方案**:
+修改 request.js 解析 DRF 验证错误格式：
+```javascript
+if (status === 400 && error.response?.data) {
+  const data = error.response.data
+  if (typeof data === 'object') {
+    const messages = Object.entries(data)
+      .map(([field, errors]) => `${field}: ${Array.isArray(errors) ? errors.join(', ') : errors}`)
+      .join('; ')
+    ElMessage.error(messages || '验证失败')
+  }
+}
+```
+
+**预防措施**:
+- request.js 需要兼容 DRF 的标准错误格式
+
+**相关文件**:
+- `frontend/src/utils/request.js`
+
+---
+
+### E206: 后端UnifiedResponse返回的errors字段未被前端正确解析
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 前后端数据格式不匹配
+
+**错误描述**:
+后端返回 `{success, code, message, errors}` 格式，其中 errors 包含详细字段错误，但前端只检查 detail 和 message。
+
+**发生场景**:
+- 后端返回包含详细错误的响应时
+
+**解决方案**:
+前端 request.js 增加对 errors 字段的解析：
+```javascript
+if (data.errors && Object.keys(data.errors).length > 0) {
+  const errorMessages = Object.values(data.errors).flat()
+  message = errorMessages.join('; ')
+}
+```
+
+**预防措施**:
+- 前后端错误格式需要保持一致
+
+**相关文件**:
+- `frontend/src/utils/request.js`
+- `backend/utils/response.py`
+
+---
+
+### E207: id_number字段max_length过小导致加密后验证失败
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 数据库字段长度不足
+
+**错误描述**:
+身份证号加密后字符串变长（超过20字符），但模型和序列化器 max_length=20，导致验证失败。
+
+**发生场景**:
+- 保存包含身份证号的人员信息时
+
+**解决方案**:
+增加 id_number 字段长度：
+```python
+id_number = models.CharField(max_length=50, verbose_name='身份证号')
+```
+
+**预防措施**:
+- 加密字段需要考虑加密后长度增加
+- 预留足够长度余量
+
+**相关文件**:
+- `backend/apps/enterprise/models.py`
+
+---
+
+### E208: 身份证号取消加密改为明文存储
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 功能变更
+
+**功能描述**:
+用户要求取消身份证号加密以简化处理，改为明文存储身份证号（长度18位）。
+
+**解决方案**:
+- 移除身份证号的加密/解密逻辑
+- 字段长度调整为 18 或 20
+
+**相关文件**:
+- `backend/apps/enterprise/models.py`
+- `backend/apps/enterprise/serializers.py`
+
+---
+
 ### F016: 实时服务监控与自动恢复系统
 
 **发生时间**: 2026-03-29
@@ -8452,7 +8956,1448 @@ services.value = response.services || []
 
 ---
 
-### E100: Ollama模型不存在 - Playground测试失败-数据库配置模型qwen2.5:14b在Ollama中未安装
+### F017: 导航栏服务异常点击重启功能
+
+**完成时间**: 2026-03-30
+
+**功能描述**:
+在侧边栏导航栏底部服务状态区域，如果服务状态为异常（error/stopped/degraded），用户可以点击服务状态点直接触发重启。
+
+**实现逻辑**:
+1. 仅对 `error`、`stopped`、`degraded` 状态的服务显示可点击样式
+2. Hover 时服务状态点放大 1.2 倍并显示发光效果
+3. 点击后弹出确认对话框，用户确认后调用 `restartService` API
+4. 重启进行中显示 Loading 动画
+5. 重启完成后自动刷新服务状态
+
+**新增代码**:
+- SidebarNav.vue:
+  - 导入 `restartService` API 和 `ElMessageBox`、`ElMessage`、`Loading` 图标
+  - 新增 `restartingService` ref 追踪正在重启的服务
+  - 新增 `isServiceRestartable()` 判断服务是否可重启
+  - 新增 `handleRestart()` 处理重启逻辑
+  - 服务状态点添加 `@click` 事件和 `is-clickable`、`is-restarting` 样式类
+- 添加 CSS 动画: `.is-clickable:hover` 放大效果、`.is-restarting` 旋转动画
+
+**影响文件**:
+- `frontend/src/components/SidebarNav.vue`
+
+---
+
+### E209: 导航栏服务重启API返回undefined
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 前端逻辑错误
+
+**错误描述**:
+点击导航栏服务状态点重启时，API 调用 `POST /api/v1/monitor/services/undefined/restart/` 返回 404 (Not Found)。
+
+**发生场景**:
+- 用户点击 SidebarNav 组件中状态为异常（error/stopped/degraded）的服务状态点
+
+**原因分析**:
+1. `system_services_status` API 返回的 services 数组中每项只有 `name`、`status`、`message` 字段，没有 `id` 字段
+2. `SidebarNav.vue` 中 `handleRestart` 函数调用 `restartService(service.id)`
+3. `service.id` 为 `undefined`，导致 API 路径变成 `/monitor/services/undefined/restart/`
+
+**解决方案**:
+修改 `config/urls.py` 中的 `system_services_status` 函数：
+1. 导入 `MonitoredService` 模型并查询所有服务的 `name -> id` 映射
+2. 新增 `add_service()` 辅助函数，在添加服务时自动附带 `id` 字段
+3. 如果服务在 `MonitoredService` 表中有记录，使用数据库中的 ID
+
+**预防措施**:
+1. 前端调用 API 时应检查必要字段是否存在
+2. 后端返回数据时确保包含所有必要字段
+
+**相关文件**:
+- `config/urls.py` (`system_services_status` 函数)
+- `frontend/src/components/SidebarNav.vue` (`handleRestart` 函数)
+- `frontend/src/api/monitor.js` (`restartService` 函数)
+
+---
+
+### E210: 手动重启服务action_type错误
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 业务逻辑错误
+
+**错误描述**:
+手动重启服务时，`ServiceActionLog` 的 `action_type` 字段被设置为 'auto_restart'，而不是 'manual_restart'。
+
+**发生场景**:
+- 用户通过 SidebarNav 点击重启异常服务时
+
+**原因分析**:
+`restart_manager.py` 的 `execute_restart` 方法固定使用 `action_type='auto_restart'`：
+```python
+action_log = ServiceActionLog.objects.create(
+    service=service,
+    action_type='auto_restart',  # 错误：手动重启应该是 'manual_restart'
+    ...
+)
+```
+
+**解决方案**:
+修改 `restart_manager.py` 的 `execute_restart` 方法，添加 `action_type` 参数：
+```python
+@staticmethod
+def execute_restart(service, action_type: str = 'auto_restart', trigger_condition: str = None) -> Dict[str, Any]:
+    ...
+    action_log = ServiceActionLog.objects.create(
+        service=service,
+        action_type=action_type,
+        ...
+    )
+```
+
+**影响文件**:
+- `backend/apps/monitor/restart_manager.py`
+
+---
+
+### E211: 手动重启API未传递action_type参数
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 调用逻辑错误
+
+**错误描述**:
+手动重启 API (`views.py` 的 `restart` 方法) 调用 `execute_restart` 时未传递 `action_type` 参数，导致总是使用默认值 'auto_restart'。
+
+**发生场景**:
+- 用户通过 SidebarNav 点击重启异常服务时
+
+**原因分析**:
+`views.py` 的 `restart` 方法调用时未指定 `action_type`：
+```python
+result = ServiceRestartManager.execute_restart(service)  # 缺少 action_type 参数
+```
+
+**解决方案**:
+修改 `views.py` 的 `restart` 方法，传递正确的参数：
+```python
+result = ServiceRestartManager.execute_restart(
+    service,
+    action_type='manual_restart',
+    trigger_condition='手动触发重启'
+)
+```
+
+**影响文件**:
+- `backend/apps/monitor/views.py`
+
+---
+
+### E212: request.js未解析500错误的详情
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 前端错误处理不完善
+
+**错误描述**:
+500错误时，前端 request.js 只显示通用"服务器错误"提示，未解析后端返回的 `error` 字段具体信息。
+
+**发生场景**:
+- 后端返回500错误时（如服务重启失败）
+
+**原因分析**:
+request.js 的 500 错误处理代码：
+```javascript
+} else if (status === 500) {
+  if (!skipErrorMessage) {
+    ElMessage.error('服务器错误')  // 只显示通用信息
+  }
+}
+```
+
+**解决方案**:
+修改 request.js，解析后端返回的错误详情：
+```javascript
+} else if (status === 500) {
+  if (!skipErrorMessage) {
+    const errorData = error.response?.data
+    let errorMsg = '服务器错误'
+    if (errorData && typeof errorData === 'object') {
+      if (errorData.error) {
+        errorMsg = errorData.error
+      } else if (errorData.message) {
+        errorMsg = errorData.message
+      } else if (errorData.detail) {
+        errorMsg = errorData.detail
+      }
+    }
+    ElMessage.error(errorMsg)
+  }
+}
+```
+
+**影响文件**:
+- `frontend/src/utils/request.js`
+
+---
+
+### E213: PATCH请求发送FormData时Content-Type错误
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 前端请求配置错误
+
+**错误描述**:
+上传PDF文件并保存时，控制台报错：`no_ongoing_commitment: 提交的数据不是一个文件。请检查表单的编码类型。`
+
+**发生场景**:
+- 在企业信息管理页面，编辑关键人员表单时上传PDF文件（如"无在建承诺"文件）
+- 点击保存按钮后返回400 Bad Request错误
+
+**原因分析**:
+1. 前端使用 `FormData` 发送包含文件的数据
+2. `request.js` 中的 `patch` 方法直接调用 `axiosInstance.patch(url, data, options)`
+3. `axiosInstance` 默认的 `Content-Type` 是 `application/json`
+4. 当发送 `FormData` 时，Axios 会自动设置正确的 `multipart/form-data` Content-Type，但前提是不手动设置 `Content-Type` 头
+5. 问题在于当代码没有显式设置 `Content-Type: multipart/form-data` 时，Axios可能使用了默认的 `application/json`，导致后端无法正确解析文件字段
+
+**解决方案**:
+修改 `request.js` 中的 `patch` 方法，当检测到 `data` 是 `FormData` 实例时，显式设置 `Content-Type: multipart/form-data`：
+
+```javascript
+patch(url, data = {}, options = {}) {
+  if (data instanceof FormData) {
+    return axiosInstance.patch(url, data, {
+      ...options,
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+  }
+  return axiosInstance.patch(url, data, options)
+}
+```
+
+**预防措施**:
+1. 当发送包含文件的 FormData 时，必须确保 `Content-Type` 设置为 `multipart/form-data`
+2. 注意 Axios 对 FormData 的处理方式：不能手动设置 `Content-Type`，否则会丢失 `boundary` 参数
+3. 更好的做法是让 Axios 自动处理，但需要确保不覆盖默认行为
+
+**相关文件**:
+- `frontend/src/utils/request.js`
+
+---
+
+### E214: 人员文件编辑时URL未正确传递和预览
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 前端数据处理错误 + 浏览器安全限制
+
+**错误描述**:
+1. 编辑已保存的人员记录时，文件区域没有任何数据显示
+2. PDF预览时浏览器报错 `Refused to display 'http://localhost:8081/' in a frame because it set 'X-Frame-Options' to 'deny'`
+
+**发生场景**:
+- 上传人员PDF文件并保存成功
+- 关闭对话框后再次点击编辑
+- 文件上传区域为空，没有显示之前的文件名
+- 点击预览按钮后PDF无法显示
+
+**原因分析**:
+1. **文件名未填充**: 后端返回 `*_file_url` 字段，但模板检查的是 `*_file_name` 字段，编辑时只复制了 URL 没有复制文件名
+2. **PDF预览被阻止**: 直接使用远程 URL 作为 iframe src，浏览器因 `X-Frame-Options` 安全策略阻止显示
+
+**解决方案**:
+1. 修改 `editPersonnel` 函数，从 URL 提取文件名填充到 `*_file_name` 字段，并使用 `decodeURIComponent` 解码 URL 编码的中文文件名：
+```javascript
+const urlToNameMap = {
+  'builder_certificate_file_url': 'builder_certificate_file_name',
+  // ... 其他字段映射
+}
+
+Object.keys(urlToNameMap).forEach(urlKey => {
+  const nameKey = urlToNameMap[urlKey]
+  if (personnelForm[urlKey] && !personnelForm[nameKey]) {
+    let fileName = personnelForm[urlKey].split('/').pop()
+    try {
+      fileName = decodeURIComponent(fileName)
+    } catch (e) {}
+    personnelForm[nameKey] = fileName
+  }
+})
+```
+
+2. 修改 PDF 预览逻辑，使用 `fetch` 获取文件内容，通过 `URL.createObjectURL()` 创建本地 blob URL 预览：
+```javascript
+else if (ext === 'pdf') {
+  try {
+    const response = await fetch(fileUrl, { credentials: 'include' })
+    if (!response.ok) throw new Error('Failed to fetch PDF')
+    const blob = await response.blob()
+    personnelPreviewUrl.value = URL.createObjectURL(blob)
+    personnelPreviewType.value = 'pdf'
+    personnelPreviewVisible.value = true
+  } catch (error) {
+    ElMessage.error('PDF预览失败，请尝试下载后查看')
+  }
+}
+```
+
+3. 后端序列化器 `EnterpriseKeyPersonnelListSerializer` 需要包含文件 URL 字段
+
+**预防措施**:
+1. 编辑时需要同时处理 URL 和文件名两个字段
+2. URL 编码的文件名需要正确解码
+3. PDF 预览应使用 blob URL 避免浏览器安全限制
+
+**相关文件**:
+- `frontend/src/views/CompanyInfo.vue`
+- `backend/apps/enterprise/serializers.py`
+
+
+---
+
+### E215: 资质证书PDF预览未使用blob方式
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 前端PDF预览错误
+
+**错误描述**:
+资质证书上传功能中，PDF预览直接使用远程URL会因X-Frame-Options安全限制被浏览器阻止，无法显示PDF内容。
+
+**发生场景**:
+- 上传资质证书PDF文件并保存
+- 点击预览按钮
+- 浏览器报错 `Refused to display 'http://localhost:8081/' in a frame because it set 'X-Frame-Options' to 'deny'`
+
+**原因分析**:
+资质证书的 `previewQualificationFile` 和 `previewQualificationFileFromList` 函数在处理PDF预览时，直接将远程URL赋值给iframe src，触发了浏览器的X-Frame-Options安全策略。
+
+**解决方案**:
+参照 `previewPersonnelFile` 函数的实现，使用 `fetch` 获取文件内容，通过 `URL.createObjectURL()` 创建本地blob URL预览：
+
+```javascript
+const previewQualificationFile = async () => {
+  // ...
+  } else if (ext === 'pdf') {
+    try {
+      const response = await fetch(fileUrl, { credentials: 'include' })
+      if (!response.ok) throw new Error('Failed to fetch PDF')
+      const blob = await response.blob()
+      personnelPreviewUrl.value = URL.createObjectURL(blob)
+      personnelPreviewType.value = 'pdf'
+      personnelPreviewVisible.value = true
+    } catch (error) {
+      console.error('PDF预览失败:', error)
+      ElMessage.error('PDF预览失败，请尝试下载后查看')
+    }
+  }
+}
+```
+
+**预防措施**:
+PDF预览统一使用blob方式，避免X-Frame-Options安全限制
+
+**相关文件**:
+- `frontend/src/views/CompanyInfo.vue`
+
+
+---
+
+### E216: 资质证书文件名URL编码未解码
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 前端数据处理错误
+
+**错误描述**:
+编辑已上传的资质证书时，文件名显示URL编码格式，如：`%E5%BE%90%E9%98%B3%E4%B8%80%E5%BB%BA%E5%BB%BA%E7%AD%91_%E6%9C%89%E6%95%88%E6%9C%9F2026%E5%B9%B45%E6%9C%8823%E6%97%A5.pdf`
+
+**发生场景**:
+- 上传资质证书文件（中文文件名）并保存
+- 点击编辑按钮
+- 文件名显示为编码格式而非正常中文
+
+**原因分析**:
+`editQualification` 函数中，从URL提取文件名后没有进行URL解码：
+```javascript
+// 错误代码
+qualificationForm.certificate_file_name = row.certificate_file?.split('/').pop() || '证书文件'
+```
+
+**解决方案**:
+添加 `decodeURIComponent` 解码：
+```javascript
+// 正确代码
+let fileName = row.certificate_file?.split('/').pop() || '证书文件'
+try {
+  fileName = decodeURIComponent(fileName)
+} catch (e) {}
+qualificationForm.certificate_file_name = fileName
+```
+
+**预防措施**:
+从URL提取文件名时必须使用 `decodeURIComponent` 解码
+
+**相关文件**:
+- `frontend/src/views/CompanyInfo.vue`
+
+
+---
+
+### E217: 前端密码验证规则不完整
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 前端表单验证错误
+
+**错误描述**:
+前端UserManagement.vue的password规则只有长度验证，缺少字母和数字的正则验证，导致用户输入纯数字密码时后端返回400错误。
+
+**发生场景**:
+- 用户在用户管理页面新建用户
+- 输入8位纯数字密码（如12345678）
+- 前端验证通过，但后端返回400错误 "password: 密码必须包含字母"
+
+**原因分析**:
+前端表单验证规则只检查了密码长度（min: 8），没有验证密码必须包含字母和数字的要求：
+```javascript
+// 错误的验证规则（只有长度）
+password: [
+  { required: true, message: '请输入密码', trigger: 'blur' },
+  { min: 8, message: '密码长度至少8位', trigger: 'blur' }
+]
+```
+
+而后端 serializers.py 要求：
+```python
+if not re.search(r'[A-Za-z]', value):
+    raise ValidationError('密码必须包含字母')
+if not re.search(r'\d', value):
+    raise ValidationError('密码必须包含数字')
+```
+
+**解决方案**:
+在 UserManagement.vue 的 formRules.password 中添加正则验证：
+```javascript
+password: [
+  { required: true, message: '请输入密码', trigger: 'blur' },
+  { min: 8, message: '密码长度至少8位', trigger: 'blur' },
+  { pattern: /[A-Za-z]/, message: '密码必须包含字母', trigger: 'blur' },
+  { pattern: /\d/, message: '密码必须包含数字', trigger: 'blur' }
+]
+```
+
+同时更新密码输入框的placeholder提示用户完整要求：
+```html
+placeholder="请输入密码（至少8位，必须包含字母和数字）"
+```
+
+**预防措施**:
+前端表单验证规则必须与后端保持一致，特别是密码强度等安全相关的验证
+
+**相关文件**:
+- `frontend/src/views/system/UserManagement.vue`
+
+
+---
+
+### E218: 用户删除为软删除且列表不过滤
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 后端逻辑错误 + 前端提示错误
+
+**错误描述**:
+用户删除操作实际上是软删除（设置 is_active=False），但前端显示"删除成功"给用户造成误导。且 UserListView 默认显示所有用户包括禁用的，导致删除后用户仍在列表显示。
+
+**发生场景**:
+- 用户在系统管理-用户管理页面点击删除按钮
+- 弹出确认框后点击确定
+- 显示"删除成功"但刷新后用户仍在列表中
+
+**原因分析**:
+1. 后端 `UserDetailView.destroy()` 是软删除：
+```python
+def destroy(self, request, *args, **kwargs):
+    instance = self.get_object()
+    instance.is_active = False
+    instance.save()
+    return APIResponse.success(message='用户已禁用')
+```
+2. 前端显示"删除成功"而非后端返回的"用户已禁用"
+3. `UserListView.get_queryset()` 默认不过滤 is_active，默认显示所有用户
+
+**解决方案**:
+1. 前端修改删除提示为"用户已禁用"：
+```javascript
+await userAdminApi.delete(row.id)
+ElMessage.success('用户已禁用')
+```
+2. 后端 `UserListView.get_queryset()` 默认过滤只显示启用用户：
+```python
+if is_active is not None:
+    queryset = queryset.filter(is_active=is_active.lower() == 'true')
+else:
+    queryset = queryset.filter(is_active=True)
+```
+
+**预防措施**:
+1. 前端提示信息应与后端返回的实际消息保持一致
+2. 列表类 API 默认应过滤已删除/禁用的数据
+
+**相关文件**:
+- `frontend/src/views/system/UserManagement.vue`
+- `backend/apps/users/views.py`
+
+
+---
+
+### F018: 企业页面文件上传预览功能
+
+**完成时间**: 2026-03-30
+
+**功能描述**:
+在企业信息管理页面（/company），文档上传对话框和人员表单中的文件上传支持选择后立即预览。
+
+**实现内容**:
+1. **文档上传对话框预览**
+   - 选择文件后显示"预览文件"按钮
+   - 支持图片（jpg, jpeg, png, gif, bmp, webp）和 PDF 格式预览
+   - 使用 `URL.createObjectURL()` 创建本地预览 URL
+
+2. **人员表单文件预览**
+   - 项目经理、技术负责人等专业工程师、八大员表单中的证明文件上传后显示预览按钮
+   - 建造师证书文件、安全生产B证文件、工程师职称证文件、社保缴纳证明等都可预览
+
+**技术实现**:
+- 使用 `URL.createObjectURL()` 实现本地文件预览
+- 根据文件扩展名判断预览类型（image/pdf/unsupported）
+- 预览对话框使用 80% 宽度、70vh 高度
+
+**相关文件**:
+- `frontend/src/views/CompanyInfo.vue`
+
+---
+
+### F019: 企业页面图片浏览器组件
+
+**完成时间**: 2026-03-30
+
+**功能描述**:
+新建功能强大的 ImageViewer 组件，提供专业级的图片浏览体验。
+
+**核心特性**:
+1. **缩略图索引网格**
+   - 底部显示缩略图列表，支持快速切换
+   - 当前选中缩略图高亮显示
+   - 自动滚动到当前图片
+
+2. **缩放控制**
+   - 放大/缩小按钮（支持 Ctrl+滚轮）
+   - 双击或单击空白处切换缩放
+   - 缩放范围：0.1x - 10x
+
+3. **旋转功能**
+   - 90度旋转按钮
+   - 支持键盘快捷键 R
+
+4. **拖拽平移**
+   - 放大后可拖拽查看
+   - 触摸屏支持双指缩放和拖拽
+
+5. **键盘快捷键**
+   - ESC: 关闭
+   - 左右箭头: 切换图片
+   - +/-: 缩放
+   - R: 旋转
+
+6. **响应式设计**
+   - 移动端适配
+   - 触控手势支持
+   - 流畅60fps动画
+
+**技术实现**:
+- Vue 3 Composition API
+- Teleport 传送到 body
+- CSS Transform 实现缩放/旋转
+- Touch Events API 支持手势
+- 全屏 API 支持
+
+**相关文件**:
+- `frontend/src/components/ImageViewer.vue`
+- `frontend/src/views/CompanyInfo.vue`
+
+---
+
+### E220: statistics API效率指标硬编码
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 数据统计不准确
+
+**错误描述**:
+- 自动化监控页面 (/automation-monitor) 的统计数据中，多项关键指标为硬编码值
+- 自动化率: crawl_auto_rate=95, match_auto_rate=80, generate_auto_rate=70, review_auto_rate=60, upload_auto_rate=90
+- 效率指标: avg_duration='2.5分钟', time_saved='78%', self_heal_rate=92
+- 这些值不是从实际业务数据计算得出的
+
+**发生场景**:
+- 用户访问自动化监控页面时
+- 查看自动化效率统计卡片时
+
+**原因分析**:
+1. statistics API 直接返回硬编码的百分比值
+2. 没有从 WorkflowStage 表查询各阶段实际执行情况
+3. 没有从实际工作流记录计算平均处理时长
+
+**解决方案**:
+修改 `apps/openclaw/workflow_views.py` 中的 `BidWorkflowViewSet.statistics` 方法：
+
+```python
+# 1. 各阶段自动化率 - 从 WorkflowStage 实际计算
+stage_stats = WorkflowStage.objects.values('stage_type').annotate(
+    total=Count('id'),
+    completed=Count('id', filter=Q(status='completed')),
+    failed=Count('id', filter=Q(status='failed'))
+)
+
+for stat in stage_stats:
+    stage_type = stat['stage_type']
+    total = stat['total'] or 1
+    completed = stat['completed'] or 0
+    failed = stat['failed'] or 0
+    auto_count = completed - failed
+    auto_rate = max(0, min(100, int((auto_count / total) * 100)))
+    stage_auto_rates[stage_type] = auto_rate
+
+# 2. 平均处理时长 - 从实际记录计算
+completed_stages = WorkflowStage.objects.filter(status='completed')
+if completed_stages.exists():
+    avg_duration_seconds = completed_stages.aggregate(avg=Avg('duration'))['avg'] or 0
+    avg_duration_minutes = round(avg_duration_seconds / 60, 1)
+    avg_duration_str = f"{avg_duration_minutes}分钟"
+
+# 3. 异常自愈率 - 从重试记录计算
+healed_failures = WorkflowStage.objects.filter(status='completed', retry_count__gt=0).count()
+total_failures = WorkflowStage.objects.filter(status='failed').count()
+self_heal_rate = int((healed_failures / max(total_failures, 1)) * 100)
+```
+
+**预防措施**:
+1. 统计API的指标必须从实际数据计算
+2. 无数据时返回默认值或0，而非硬编码估算值
+
+**相关文件**:
+- `backend/apps/openclaw/workflow_views.py`
+
+---
+
+### E221: statistics API中标数据来源错误
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 数据统计来源错误
+
+**错误描述**:
+- 今日中标统计 `won_today` 从 `TenderProject.objects.filter(status='won')` 查询
+- 但实际中标信息存储在 `BidResult` 表中，`result_type='win'` 才是真正的中标记录
+- TenderProject.status='won' 与实际中标结果可能不同步
+
+**发生场景**:
+- 用户访问自动化监控页面查看今日中标数时
+- 查看中标趋势统计时
+
+**原因分析**:
+1. 错误地从 TenderProject 表查询 status='won'
+2. 实际业务中，中标结果记录在 BidResult 表
+3. TenderProject 可能只记录招标项目状态，不是中标状态
+
+**解决方案**:
+修改 `apps/openclaw/workflow_views.py` 中的查询逻辑：
+
+```python
+# 错误写法：
+won_today = TenderProject.objects.filter(status='won', updated_at__date=today).count()
+
+# 正确写法：
+from apps.bids.models import BidResult
+won_today = BidResult.objects.filter(result_type='win', created_at__date=today).count()
+```
+
+**预防措施**:
+1. 中标信息应从 BidResult 表查询，不是 TenderProject 表
+2. 业务数据统计前先确认数据实际存储位置
+
+**相关文件**:
+- `backend/apps/openclaw/workflow_views.py`
+- `backend/apps/bids/models.py` (BidResult 模型)
+
+---
+
+### E222: CrawlSchedule与PeriodicTask的Crontab不一致
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 定时任务配置错误
+
+**错误描述**:
+- 上海政府采购采集计划的 `CrawlSchedule.crontab` 为 `35 01 * * *`（凌晨1:35）
+- 但关联的 `PeriodicTask.crontab` 为 `35 20 * * *`（晚上8:35）
+- 政府采购网采集的 `CrawlSchedule.crontab` 为 `25 02 * * *`（凌晨2:25）
+- 但关联的 `PeriodicTask.crontab` 为 `25 20 * * *`（晚上8:25）
+- 导致定时任务按错误时间执行，或根本不执行
+
+**发生场景**:
+- Celery Beat 调度定时采集任务时
+- 定时任务触发时间与预期不符
+
+**原因分析**:
+1. `CrawlSchedule` 模型和 `PeriodicTask` 模型是分开管理的
+2. 创建 `PeriodicTask` 时可能硬编码了错误的时间值（统一设置为20:xx）
+3. `CrawlSchedule.update_celery_task()` 方法没有正确同步 crontab
+4. 两个模型之间缺少数据一致性校验
+
+**解决方案**:
+手动修复数据库中的 PeriodicTask crontab：
+
+```python
+from django_celery_beat.models import PeriodicTask, CrontabSchedule
+
+# 修复 crawl_schedule_6
+task = PeriodicTask.objects.get(name='crawl_schedule_6')
+new_crontab, _ = CrontabSchedule.objects.get_or_create(
+    minute='35', hour='01', day_of_month='*',
+    month_of_year='*', day_of_week='*', timezone='Asia/Shanghai'
+)
+task.crontab = new_crontab
+task.save()
+
+# 修复 crawl_schedule_4
+task = PeriodicTask.objects.get(name='crawl_schedule_4')
+new_crontab, _ = CrontabSchedule.objects.get_or_create(
+    minute='25', hour='02', day_of_month='*',
+    month_of_year='*', day_of_week='*', timezone='Asia/Shanghai'
+)
+task.crontab = new_crontab
+task.save()
+```
+
+**预防措施**:
+1. 创建/更新 `CrawlSchedule` 时自动同步 `PeriodicTask` 的 crontab
+2. 定期检查两个模型的 crontab 是否一致
+3. 在 `update_celery_task()` 方法中添加校验逻辑
+
+**相关文件**:
+- `backend/apps/crawler/scheduler_models.py` (CrawlSchedule 模型)
+- `backend/apps/crawler/scheduler_views.py` (update_celery_task 方法)
+- `django_celery_beat.models` (PeriodicTask, CrontabSchedule)
+
+---
+
+### E223: Celery Worker启动时未加载crawler.tasks模块
+
+**发生时间**: 2026-03-30
+
+**错误类型**: Celery 任务注册问题
+
+**错误描述**:
+- 使用 `celery -A config.celery worker` 启动 Worker 时
+- `crawler.tasks` 模块中的任务（如 `scheduled_crawl_with_match`）没有被自动发现
+- `celery control inspect registered` 显示任务列表中没有 `crawler.tasks.*`
+
+**发生场景**:
+- 执行 `celery -A config.celery worker --loglevel=info` 启动 Worker
+- 查看任务列表时发现缺少 crawler 模块的任务
+
+**原因分析**:
+1. `config.celery.py` 中配置了 `autodiscover_tasks(['crawler', 'monitor', 'unified_scheduler'])`
+2. 但 `crawler.tasks` 可能不在 `crawler/__init__.py` 的默认加载路径中
+3. Django APP `crawler` 的任务模块没有被正确关联
+
+**解决方案**:
+启动 Celery Worker 时使用 `--include` 参数明确指定要加载的模块：
+
+```bash
+celery -A config.celery worker --loglevel=info --concurrency=4 --pool=solo --include=crawler.tasks
+```
+
+或修改 `crawler/__init__.py`，确保 tasks 模块被正确导入：
+
+```python
+# crawler/__init__.py
+default_app_config = 'apps.crawler.apps.CrawlerConfig'
+from apps.crawler import tasks  # 确保 tasks 被加载
+```
+
+**预防措施**:
+1. 启动 Celery Worker 后检查任务是否正确加载：`celery -A config.celery inspect registered`
+2. 在项目文档中记录正确的启动命令
+3. 使用 supervisor 或 systemd 管理 Celery 进程，确保使用正确的启动参数
+
+**相关文件**:
+- `backend/config/celery.py` (Celery 配置)
+- `backend/apps/crawler/__init__.py`
+- `backend/crawler/tasks.py` (任务定义)
+
+---
+
+### E224: Celery Worker未监听crawler队列
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 任务路由配置错误
+
+**错误描述**:
+- `crawler.tasks.*` 任务被路由到 `crawler` 队列
+- 但 Celery Worker 默认只监听 `celery` 队列
+- 导致任务堆积在 `crawler` 队列中，永远不会被执行
+- `redis-cli` 检查显示队列有消息，但 Worker 不消费
+
+**发生场景**:
+- 任务被成功提交到 Redis 队列
+- 但 Celery Worker 日志没有任何任务执行记录
+- Redis 中 `crawler` 队列长度持续不变
+
+**原因分析**:
+1. `crawler.tasks.scheduled_crawl_with_match` 任务使用 `@shared_task(queue='crawler')` 装饰器
+2. 任务被路由到 `crawler` 队列
+3. 启动 Worker 时没有指定 `-Q celery,crawler,default`，只监听默认队列
+
+**解决方案**:
+启动 Celery Worker 时指定监听的所有队列：
+
+```bash
+celery -A config.celery worker --loglevel=info --concurrency=4 --pool=solo --include=crawler.tasks -Q celery,crawler,default
+```
+
+参数说明：
+- `-Q celery,crawler,default`: 指定监听的所有队列，用逗号分隔
+
+**预防措施**:
+1. 启动 Celery Worker 前确认所有需要监听的队列
+2. 定期检查 Redis 队列状态，确保任务被正常消费
+3. 使用 `celery -A config.celery inspect active` 确认任务执行状态
+
+**相关文件**:
+- `backend/config/celery.py` (Celery 配置)
+- `backend/crawler/tasks.py` (任务定义和队列配置)
+
+---
+
+### E225: 前端代理ECONNREFUSED导致500错误
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 前端开发服务器代理配置问题
+
+**错误描述**:
+- 前端调用登录API时返回 500 Internal Server Error
+- 前端控制台显示: `Proxy error: Could not proxy request /api/v1/auth/login/ from localhost:8081 to http://localhost:8000 (ECONNREFUSED)`
+- 但后端API直接测试正常工作（返回200）
+
+**发生场景**:
+- 用户在浏览器登录页面点击登录时
+- 前端Vite开发服务器(8081)将API请求代理到后端Django服务器(8000)
+- 代理连接失败，导致500错误
+
+**原因分析**:
+1. 后端Django服务器正常运行在端口8000
+2. 前端通过 vue.config.js 的 proxy 配置将 `/api` 请求代理到 `http://localhost:8000`
+3. Vite代理在某些情况下无法建立连接
+4. 后端API本身功能正常
+
+**解决方案**:
+1. 刷新浏览器页面重试
+2. 重启前端开发服务器：
+   ```bash
+   # 在前端目录
+   Ctrl+C 停止
+   npm run serve 重新启动
+   ```
+3. 确认后端服务器正在运行
+
+**预防措施**:
+1. 启动前端前先确认后端是否运行
+2. 使用 `curl http://localhost:8000/api/v1/` 验证后端连接
+3. 查看后端日志确认请求是否到达
+
+**相关文件**:
+- `frontend/vue.config.js` (前端代理配置)
+- `backend/config/urls.py` (API路由)
+
+---
+
+### E226: restart_manager.py不支持Windows服务管理
+
+**发生时间**: 2026-03-30
+
+**错误类型**: 跨平台兼容性问题
+
+**错误描述**:
+- 前端点击"重启服务"按钮时返回 500 Internal Server Error
+- 错误信息: `{"error":"重启执行返回失败"}`
+- 后端API测试返回500，但前端代理ECONNREFUSED已排除
+
+**发生场景**:
+- 用户在导航栏监控面板中点击某个服务的"重启"按钮
+- 例如重启 PostgreSQL 数据库服务时
+
+**原因分析**:
+1. `restart_manager.py` 的 `_do_restart` 方法使用 Linux 风格的重启命令
+2. Windows 上不存在这些命令:
+   - `pg_ctl` (PostgreSQL控制命令) - Windows上使用 `pg_ctl`
+   - `redis-server` - Windows上使用 `redis-server.exe`
+   - `systemctl` - Windows服务管理使用 `sc` 或 `net` 命令
+   - `docker restart` - Docker Desktop for Windows 支持
+3. `subprocess.run()` 执行这些命令返回 returncode != 0，导致 `_do_restart` 返回 False
+4. View 层收到 False 后返回 500 错误
+
+**解决方案**:
+修改 `restart_manager.py` 的 `_do_restart` 方法，添加 Windows 兼容的重启命令:
+
+```python
+import platform
+import subprocess
+import win32serviceutil  # 需要 pywin32
+
+class ServiceRestartManager:
+    RESTART_COMMANDS = {
+        # Linux 命令 (保持兼容)
+        'celery_worker': ['celery', '-A', 'config', 'worker', '--loglevel=info', '--pool=prefork', '-n', 'worker1@%h'],
+        'celery_beat': ['celery', '-A', 'config', 'beat', '--loglevel=info'],
+        'redis': ['redis-server'],
+        'postgresql': ['pg_ctl', '-D', 'data', 'restart'],
+        'milvus': ['docker', 'restart', 'milvus'],
+        'chroma': ['docker', 'restart', 'chroma'],
+        'ollama': ['systemctl', 'restart', 'ollama'],
+    }
+
+    # Windows 重启命令
+    WINDOWS_RESTART_COMMANDS = {
+        'postgresql': ['pg_ctl', '-D', 'C:/Program Files/PostgreSQL/data', 'restart'],
+        'redis': ['net', 'stop', 'Redis'], ['net', 'start', 'Redis'],
+    }
+
+    @staticmethod
+    def _do_restart(service) -> bool:
+        if platform.system() == 'Windows':
+            return ServiceRestartManager._do_restart_windows(service)
+        else:
+            return ServiceRestartManager._do_restart_linux(service)
+
+    @staticmethod
+    def _do_restart_windows(service) -> bool:
+        """Windows环境下的服务重启"""
+        import win32serviceutil
+        service_name_map = {
+            'postgresql': 'postgresql-x64-16',  # 需要根据实际服务名调整
+            'redis': 'Redis',
+        }
+        for key, windows_service in service_name_map.items():
+            if key in service.name.lower():
+                try:
+                    win32serviceutil.RestartService(windows_service)
+                    return True
+                except Exception as e:
+                    logger.error(f"Windows服务重启失败: {str(e)}")
+                    return False
+        # 如果没有匹配的服务，返回失败
+        logger.warning(f"未找到服务 {service.name} 的Windows重启方式")
+        return False
+```
+
+**预防措施**:
+1. 跨平台应用应使用平台检测并调用相应命令
+2. 或使用 `psutil` 库实现更通用的进程管理
+3. 考虑使用 Windows Service Wrapper (nssm) 管理非Windows原生服务
+
+**相关文件**:
+- `backend/apps/monitor/restart_manager.py`
+
+---
+
+### E227: Milvus连接阻塞导致API超时
+
+**发生时间**: 2026-03-31
+
+**错误类型**: 服务阻塞/性能问题
+
+**错误描述**:
+- 导航栏每30秒轮询 `system/services` API 返回 500 Internal Server Error
+- API响应时间长达18秒，超出前端30秒超时限制
+- 后端日志显示: `Milvus初始化失败: Fail connecting to server on localhost:19530`
+
+**发生场景**:
+- 前端页面加载后，SidebarNav组件每30秒调用 `fetchServices()`
+- `system/services` API 被阻塞在 Milvus 连接尝试上
+
+**原因分析**:
+1. `services/vector/milvus_service.py` 的 `MilvusService.__init__()` 在模块加载时调用 `_initialize()`
+2. `_initialize()` 使用 `connections.connect()` 尝试连接 Milvus 服务器
+3. 连接超时设置为5秒，且可能重试2次
+4. Milvus 服务器未运行，导致每次连接尝试阻塞5秒
+5. 总阻塞时间 = 5秒 × 2次 = 10秒（仅Milvus）
+
+**解决方案**:
+修改 `MilvusService.__init__()` 方法，延迟初始化，不在构造函数中连接:
+
+```python
+def __init__(self):
+    if self._initialized:
+        return
+
+    self._client = None
+    self._connected = False
+    self._collection = None
+    self._embedding_service = None
+
+    # 移除 _initialize() 调用，改为延迟初始化
+    self._initialized = True
+```
+
+**预防措施**:
+1. 可选服务（Milvus、Chroma等）应使用延迟初始化
+2. 在服务启动时添加超时保护
+3. 考虑使用异步连接或后台线程进行健康检查
+
+**相关文件**:
+- `backend/services/vector/milvus_service.py`
+
+---
+
+### E228: system/services API性能问题
+
+**发生时间**: 2026-03-31
+
+**错误类型**: API性能问题
+
+**错误描述**:
+- `system/services` API 响应时间长达18秒
+- 前端30秒轮询超时，导致导航栏状态检测失效
+- 用户看到的服务状态是过期的或不准确的
+
+**发生场景**:
+- 前端SidebarNav组件轮询 `system/services` API
+- 用户打开导航栏查看服务状态时需要等待很长时间
+
+**原因分析**:
+1. API 同步检查所有12个服务的状态
+2. 每个可选服务（Celery、Chroma、MinIO、Ollama等）使用3-5秒超时
+3. 所有超时串行执行，总时间 = 所有超时之和
+4. 可选服务应该异步检查或快速失败
+
+**解决方案**:
+1. 核心服务（PostgreSQL、Redis）同步快速检查（<1秒）
+2. 可选服务（Celery、Chroma、MinIO、Ollama）使用后台线程异步检查
+3. 减少超时时间到1-2秒
+4. 添加结果缓存
+
+```python
+# 使用线程池并行检查可选服务
+celery_thread = threading.Thread(target=check_celery_async)
+celery_thread.daemon = True
+celery_thread.start()
+
+# 等待所有线程完成（最多等待2秒）
+celery_thread.join(timeout=2)
+```
+
+**预防措施**:
+1. 健康检查API应该快速响应（<2秒）
+2. 可选服务使用异步检查或后台任务
+3. 添加缓存减少重复检查
+
+**相关文件**:
+- `backend/config/urls.py` (`system_services_status` 函数)
+
+---
+
+### E229: 前端无法检测后端离线状态
+
+**发生时间**: 2026-03-31
+
+**错误类型**: 前端状态管理问题
+
+**错误描述**:
+- 当后端服务器停止时，前端导航栏没有任何视觉提示
+- 用户不知道后端已离线，继续操作导致API请求失败
+- `fetchServices()` 函数捕获错误但只输出 `console.error`
+
+**发生场景**:
+- 后端Django服务器意外停止时
+- 用户在浏览器中操作，系统显示各种API错误但没有明确指示后端离线
+
+**原因分析**:
+1. `SidebarNav.vue` 的 `fetchServices()` 函数在 `catch` 块中只记录错误
+2. 没有设置任何状态变量来指示后端离线
+3. 用户界面没有显示任何警告或错误提示
+
+**解决方案**:
+在 `SidebarNav.vue` 中添加 `backendOnline` 状态:
+
+```javascript
+const backendOnline = ref(true)
+
+// 在 fetchServices 中设置状态
+const fetchServices = async () => {
+  try {
+    // ... API 调用
+    backendOnline.value = true
+  } catch (error) {
+    console.error('获取服务状态失败:', error)
+    backendOnline.value = false  // 设置离线状态
+  }
+}
+
+// 在 overallStatus 计算中处理 offline 状态
+const overallStatus = computed(() => {
+  if (!backendOnline.value) return 'offline'
+  // ... 其他状态逻辑
+})
+
+// 在 overallStatusText 中添加文本
+const overallStatusText = computed(() => {
+  const textMap = {
+    'offline': '后端离线',
+    // ... 其他状态
+  }
+})
+```
+
+**预防措施**:
+1. 所有API调用都应该有错误状态处理
+2. 关键状态变化应该反映在UI上
+3. 使用统一的错误处理机制
+
+**相关文件**:
+- `frontend/src/components/SidebarNav.vue`
+
+---
+
+### E230: system/services API缓存无效
+
+**发生时间**: 2026-03-31
+
+**错误类型**: 缓存机制问题
+
+**错误描述**:
+- API虽然实现了Redis缓存，但响应时间仍然是6-18秒交替
+- 缓存5秒有效期内，每次请求都应该<100ms返回
+- 实际测试显示缓存未生效
+
+**发生场景**:
+- 前端连续多次调用 `system/services` API
+- 缓存键存在但响应时间没有明显改善
+
+**原因分析**:
+1. Django 开发服务器 (`runserver`) 是单进程单线程的
+2. 异步线程检查（Celery、Chroma等）会阻塞主线程
+3. Redis 缓存命中后仍需等待线程空闲
+4. Django autoreload 机制会重置进程内内存缓存
+
+**解决方案**:
+1. 添加进程内内存缓存作为一级缓存
+2. Redis 作为二级缓存
+3. 双重缓存减少对外部服务的依赖
+
+```python
+# 模块级内存缓存
+_services_cache = {'data': None, 'expires': 0}
+_services_cache_lock = threading.Lock()
+
+# 在函数中先检查内存缓存
+with _services_cache_lock:
+    if _services_cache['data'] and _services_cache['expires'] > time.time():
+        return JsonResponse(_services_cache['data'])
+```
+
+**预防措施**:
+1. 敏感API使用多级缓存
+2. 考虑使用生产级服务器（gunicorn/uvicorn）替代开发服务器
+3. 监控API响应时间，设置告警
+
+**相关文件**:
+- `backend/config/urls.py` (`system_services_status` 函数)
+
+
+---
+
+### E231: 服务重启API对不支持的重启返回500
+
+**发生时间**: 2026-03-31
+
+**错误类型**: API错误码处理不当
+
+**错误描述**:
+点击重启服务时返回500错误：`Restart failed with status code 500`
+
+**发生场景**:
+- 在系统监控页面点击某个服务的"重启"按钮
+- 浏览器控制台显示500错误
+
+**原因分析**:
+1. 监控服务ID=9的服务（可能是某个不支持的重启模式）
+2. `ServiceRestartManager._do_restart_windows` 在Windows上尝试多种重启方式
+3. 如果服务名称不匹配任何重启模式（如postgresql、redis、celery_worker、celery_beat、docker等），返回 `False`
+4. 视图直接将False视为重启失败，返回500错误
+5. 实际上这是"不支持重启"而非"重启执行失败"
+
+**解决方案**:
+修改 `MonitoredServiceViewSet.restart` 方法，区分不同类型的错误：
+- "不支持的重启"（服务名称不匹配任何模式）→ 返回400
+- "重启执行失败"（命令执行失败）→ 返回500
+
+```python
+else:
+    error_msg = result.get('message', '重启失败')
+    if '不支持' in error_msg or '未找到' in error_msg or '无法' in error_msg:
+        return Response({'error': error_msg}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({'error': error_msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+```
+
+**预防措施**:
+API错误码应区分业务错误(400)和服务器错误(500)
+
+**相关文件**:
+- `backend/apps/monitor/views.py`
+
+
+---
+
+### E232: 服务重启时Docker未安装
+
+**发生时间**: 2026-04-01
+
+**错误类型**: 环境依赖缺失
+
+**错误描述**:
+- 在系统监控页面点击某个Docker容器服务（Milvus/Chroma/MinIO等）的"重启"按钮
+- 浏览器控制台显示 `400 (Bad Request)` 错误
+- 错误消息: `error: Docker未安装`
+
+**发生场景**:
+- 用户在侧边栏监控面板或系统监控页面点击服务重启按钮
+- 服务ID=9的服务（可能是Milvus或其他Docker容器服务）
+
+**原因分析**:
+1. `restart_manager.py` 中的 `_do_restart_docker` 方法尝试通过 `subprocess.run(['docker', 'info'])` 检查Docker是否安装
+2. 在Windows环境下，如果未安装Docker Desktop，会抛出 `FileNotFoundError: [Errno 2] No such file or directory: 'docker'`
+3. 该异常被捕获并返回 `(False, "Docker未安装")`
+4. `views.py` 中根据错误消息中的"未"字判断返回400错误（E231修复）
+
+**解决方案**:
+这是Windows环境的已知限制，Milvus/Chroma/MinIO等服务依赖Docker Desktop for Windows：
+- 方案1（推荐）: 在Windows上安装 Docker Desktop for Windows
+- 方案2: 使用Docker Desktop WSL2后端而非Linux容器模式
+- 方案3: 暂时忽略这些服务的重启功能，等待Linux环境部署
+
+**预防措施**:
+- 前端可以在点击重启按钮前检查服务类型，对依赖Docker的服务显示警告信息
+- 后端可以提供 `/api/v1/monitor/services/` 接口返回每个服务是否支持重启的信息
+
+**相关文件**:
+- `backend/apps/monitor/restart_manager.py` - `_do_restart_docker` 方法
+- `backend/apps/monitor/views.py` - `restart` 方法
+
+---
+
+### E233: docker-compose.yml配置错误：container_name与replicas冲突
+
+**发生时间**: 2026-04-02
+
+**错误类型**: Docker Compose配置错误
+
+**错误描述**:
+执行 `docker-compose up -d` 时报错：
+```
+can't set container name "bid-frontend" and replicas together
+```
+
+**发生场景**:
+- 使用docker-compose启动服务时
+
+**原因分析**:
+docker-compose.yml中frontend服务同时配置了：
+```yaml
+container_name: bid-frontend
+deploy:
+  replicas: 2
+```
+Docker Compose不允许同时设置container_name和replicas，因为replicas会创建多个同名容器。
+
+**解决方案**:
+移除所有服务的container_name配置（frontend、backend、fastapi、celery-worker、celery-crawler、celery-beat），让Docker Compose自动生成容器名称：
+```yaml
+# 移除 container_name: bid-frontend
+deploy:
+  replicas: 2
+```
+
+**相关文件**:
+- `docker-compose.yml` - frontend、backend、fastapi、celery-worker、celery-crawler、celery-beat服务配置
+
+---
+
+### E234: Dockerfile.fastapi COPY路径错误
+
+**发生时间**: 2026-04-02
+
+**错误类型**: Docker构建错误
+
+**错误描述**:
+执行 `docker-compose up` 时FastAPI服务构建失败：
+```
+Dockerfile.fastapi:26
+failed to solve: failed to compute cache key: failed to calculate checksum of ref vi3bxtqskvvt36e9f6irmbvhy::ioj89ox0p9ba3kna7jpreywz1: "/backend/utils": not found
+```
+
+**发生场景**:
+- 使用docker-compose构建FastAPI服务镜像时
+
+**原因分析**:
+docker-compose.yml中fastapi服务的build context是`./backend`：
+```yaml
+fastapi:
+  build:
+    context: ./backend
+    dockerfile: Dockerfile.fastapi
+```
+
+但Dockerfile.fastapi中的COPY路径错误地使用了`backend/xxx`：
+```dockerfile
+COPY backend/utils /app/utils  # 错误：build context已经是backend
+```
+
+**解决方案**:
+修改Dockerfile.fastapi中的COPY路径（移除`backend/`前缀）：
+```dockerfile
+COPY utils /app/utils  # 正确：build context是./backend
+```
+
+**相关文件**:
+- `backend/Dockerfile.fastapi` - COPY指令
+- `docker-compose.yml` - fastapi服务的build context配置
+
+---
+
+### E235: backend目录缺少.dockerignore
+
+**发生时间**: 2026-04-02
+
+**错误类型**: Docker构建性能问题
+
+**错误描述**:
+backend服务构建时传输上下文过大：
+```
+[celery-crawler internal] load build context
+[celery-crawler internal] transferring context: 298.64MB 20.6s
+```
+
+**发生场景**:
+- backend目录下没有.dockerignore文件
+- 包含node_modules、__pycache__等大文件被传输到构建上下文
+
+**原因分析**:
+backend目录是docker-compose.yml的build context，但没有.dockerignore文件排除不需要的文件，导致大量无用文件被传输。
+
+**解决方案**:
+创建 `backend/.dockerignore` 文件：
+```
+__pycache__
+*.pyc
+*.pyo
+node_modules
+.env
+.git
+*.log
+*.md
+tests
+venv/
+```
+
+**相关文件**:
+- `backend/.dockerignore` - 新建文件
+
+---
+
+### E236: Docker Desktop无法启动（日志文件被锁定）
+
+**发生时间**: 2026-04-02
+
+**错误类型**: Docker Desktop启动失败
+
+**错误描述**:
+启动Docker Desktop时报错：
+```
+Not allow operate files: C:\Users\ZhangGan\AppData\Local\Docker\log\host\Docker Desktop.exe.log
+```
+
+**发生场景**:
+- 系统重启后尝试启动Docker Desktop时
+
+**原因分析**:
+Docker Desktop的日志文件被其他进程锁定，可能原因：
+1. 之前的Docker Desktop实例未完全关闭
+2. 杀毒软件或安全软件正在扫描该文件
+3. 文件资源管理器预览功能打开了该文件
+
+**解决方案**:
+1. 关闭所有可能占用Docker日志的程序（IDE、终端等）
+2. 手动删除或重命名日志文件：
+   ```powershell
+   Remove-Item "C:\Users\ZhangGan\AppData\Local\Docker\log\host\Docker Desktop.exe.log" -Force
+   ```
+3. 以管理员身份启动Docker Desktop
+
+**预防措施**:
+- 定期清理Docker Desktop日志文件
+- 避免在Docker运行时打开相关日志目录
+
+---
+
+### E237: DOCKER_HOST环境变量配置错误
+
+**发生时间**: 2026-04-02
+
+**错误类型**: Docker客户端配置错误
+
+**错误描述**:
+Docker Desktop已正常运行，但docker命令失败：
+```
+error during connect: Get "http://%2F%2Flocalhost:2375/v1.24/containers/json": 
+dial tcp [::1]:2375: connectex: No connection could be made
+```
+
+**发生场景**:
+- 设置了DOCKER_HOST环境变量后
+
+**原因分析**:
+1. 之前设置了 `DOCKER_HOST=tcp://localhost:2375`
+2. Docker Desktop使用npipe管道连接（Windows原生）
+3. 设置DOCKER_HOST后docker CLI尝试TCP连接，但Docker Desktop未监听2375端口
+
+**解决方案**:
+1. 清除DOCKER_HOST环境变量：
+   ```powershell
+   [Environment]::SetEnvironmentVariable("DOCKER_HOST", "", "User")
+   ```
+2. 使用docker context切换：
+   ```powershell
+   docker context use desktop-linux
+   ```
+3. 验证：`docker ps` 应该正常工作
+
+**预防措施**:
+- 在Windows上使用Docker Desktop时，不要设置DOCKER_HOST环境变量
+- 使用 `docker context ls` 和 `docker context use` 管理连接
+
+**相关文件**:
+- `docker-compose.yml` - 环境变量配置
+
+---
+
+### E100: Ollama模型不存在
 
 **发生时间**: 2026-03-27
 

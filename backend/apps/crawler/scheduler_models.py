@@ -191,7 +191,7 @@ class CrawlScheduleLog(models.Model):
 
     started_at = models.DateTimeField('开始时间', default=timezone.now)
     finished_at = models.DateTimeField('结束时间', blank=True, null=True)
-    duration = models.IntegerField('耗时(秒)', default=0)
+    duration = models.FloatField('耗时(秒)', default=0.0)
 
     class Meta:
         db_table = 'crawl_schedule_logs'

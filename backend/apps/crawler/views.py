@@ -338,7 +338,7 @@ class CrawlSessionViewSet(APIResponseMixin, viewsets.ModelViewSet):
                 session.status = 'completed'
                 session.result_count = len(results)
                 session.finished_at = timezone.now()
-                session.duration = (session.finished_at - session.started_at).seconds
+                session.duration = (session.finished_at - session.started_at).total_seconds()
                 session.save()
             
             result_serializer = CrawlResultListSerializer(
@@ -495,3 +495,281 @@ class CrawlLogViewSet(APIResponseMixin, viewsets.ReadOnlyModelViewSet):
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['session', 'level']
     ordering = ['-created_at']
+
+
+class ContentRecognitionRuleViewSet(AuthenticatedModelViewSet):
+    """
+    内容识别规则视图集
+    """
+    queryset = None
+    from .models import ContentRecognitionRule
+    queryset = ContentRecognitionRule.objects.all()
+    serializer_class = None
+    from .serializers import ContentRecognitionRuleSerializer
+    serializer_class = ContentRecognitionRuleSerializer
+    filterset_fields = ['content_type', 'is_active']
+    search_fields = ['name', 'code']
+    ordering_fields = ['priority', 'created_at']
+    ordering = ['-priority', '-created_at']
+
+    @extend_schema(
+        summary='测试识别规则',
+        description='使用指定规则测试内容识别效果'
+    )
+    @action(detail=True, methods=['post'])
+    def test(self, request, pk=None):
+        """
+        测试识别规则
+        """
+        rule = self.get_object()
+        content = request.data.get('content', '')
+        url = request.data.get('url', '')
+
+        if not content:
+            return UnifiedResponse.error(
+                message='测试内容不能为空',
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        from openclaw.agents.content_recognition_agent import ContentRecognitionAgent
+        import asyncio
+
+        agent = ContentRecognitionAgent()
+
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            async def run_test():
+                return await agent.execute({
+                    'content': content,
+                    'url': url,
+                    'content_type': rule.content_type,
+                    'raw_data': {},
+                    'save_to_db': False,
+                    'validate_quality': True
+                })
+
+            result = loop.run_until_complete(run_test())
+            loop.close()
+
+            if result.success:
+                return UnifiedResponse.success(
+                    message='识别成功',
+                    data={
+                        'extracted_data': result.data.get('extracted_data'),
+                        'quality_result': result.data.get('quality_result')
+                    }
+                )
+            else:
+                return UnifiedResponse.error(
+                    message=f'识别失败: {result.error}',
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+        except Exception as e:
+            logger.error(f"测试识别规则失败: {str(e)}")
+            return UnifiedResponse.error(
+                message=f'测试失败: {str(e)}',
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+
+class RecognizedContentViewSet(AuthenticatedModelViewSet):
+    """
+    已识别内容视图集
+    """
+    queryset = None
+    from .models import RecognizedContent
+    queryset = RecognizedContent.objects.all()
+    filterset_fields = ['content_type', 'source_type', 'quality_grade', 'is_processed']
+    search_fields = ['title', 'project_code', 'purchaser_name', 'agency_name']
+    ordering_fields = ['quality_score', 'publish_date', 'created_at']
+    ordering = ['-created_at']
+
+    def get_serializer_class(self):
+        """
+        根据动作选择序列化器
+        """
+        from .serializers import RecognizedContentSerializer, RecognizedContentListSerializer
+        if self.action == 'list':
+            return RecognizedContentListSerializer
+        return RecognizedContentSerializer
+
+    @extend_schema(
+        summary='批量识别内容',
+        description='批量识别多个内容并返回结构化结果'
+    )
+    @action(detail=False, methods=['post'])
+    def batch_recognize(self, request):
+        """
+        批量识别内容
+        """
+        from .serializers import BatchRecognizeSerializer
+        from openclaw.agents.content_recognition_agent import BatchContentRecognitionAgent
+        import asyncio
+
+        serializer = BatchRecognizeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        items = serializer.validated_data['items']
+        content_type = serializer.validated_data.get('content_type', 'tender')
+        save_to_db = serializer.validated_data.get('save_to_db', True)
+        validate_quality = serializer.validated_data.get('validate_quality', True)
+
+        agent = BatchContentRecognitionAgent()
+
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            async def run_batch():
+                return await agent.execute({
+                    'items': [
+                        {**item, 'content_type': content_type}
+                        for item in items
+                    ],
+                    'save_to_db': save_to_db,
+                    'validate_quality': validate_quality
+                })
+
+            result = loop.run_until_complete(run_batch())
+            loop.close()
+
+            if result.success:
+                return UnifiedResponse.success(
+                    message=f'批量识别完成: 成功 {result.data.get("success_count", 0)}, 失败 {result.data.get("failed_count", 0)}',
+                    data=result.data
+                )
+            else:
+                return UnifiedResponse.error(
+                    message=f'批量识别失败: {result.error}',
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+        except Exception as e:
+            logger.error(f"批量识别失败: {str(e)}")
+            return UnifiedResponse.error(
+                message=f'批量识别失败: {str(e)}',
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+    @extend_schema(
+        summary='获取质量统计',
+        description='获取已识别内容的质量统计信息'
+    )
+    @action(detail=False, methods=['get'])
+    def quality_stats(self, request):
+        """
+        获取质量统计
+        """
+        from django.db.models import Count
+
+        contents = RecognizedContent.objects.all()
+
+        grade_stats = contents.values('quality_grade').annotate(
+            count=Count('id')
+        ).order_by('quality_grade')
+
+        type_stats = contents.values('content_type').annotate(
+            count=Count('id')
+        ).order_by('content_type')
+
+        avg_score = contents.filter(
+            quality_score__gt=0
+        ).aggregate(avg=models.Avg('quality_score'))
+
+        return UnifiedResponse.success(data={
+            'grade_distribution': {
+                item['quality_grade']: item['count']
+                for item in grade_stats if item['quality_grade']
+            },
+            'type_distribution': {
+                item['content_type']: item['count']
+                for item in type_stats
+            },
+            'average_quality_score': round(avg_score['avg'] or 0, 2),
+            'total_count': contents.count(),
+            'processed_count': contents.filter(is_processed=True).count()
+        })
+
+    @extend_schema(
+        summary='处理低质量内容',
+        description='对低质量内容进行重新识别或标记'
+    )
+    @action(detail=False, methods=['post'])
+    def reprocess_low_quality(self, request):
+        """
+        重新识别低质量内容
+        """
+        threshold = request.data.get('threshold', 60)
+        max_items = request.data.get('max_items', 50)
+
+        low_quality_items = RecognizedContent.objects.filter(
+            quality_score__lt=threshold,
+            is_processed=False
+        ).exclude(
+            quality_grade='A'
+        )[:max_items]
+
+        if not low_quality_items:
+            return UnifiedResponse.success(
+                message='没有需要重新处理的内容',
+                data={'count': 0}
+            )
+
+        from openclaw.agents.content_recognition_agent import ContentRecognitionAgent
+        import asyncio
+
+        success_count = 0
+        failed_count = 0
+
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            async def reprocess_item(item):
+                nonlocal success_count, failed_count
+                agent = ContentRecognitionAgent()
+
+                try:
+                    result = await agent.execute({
+                        'content': item.raw_content or '',
+                        'url': item.source_url,
+                        'source_type': item.source_type,
+                        'content_type': item.content_type,
+                        'raw_data': item.extracted_data,
+                        'save_to_db': True,
+                        'validate_quality': True
+                    })
+
+                    if result.success:
+                        success_count += 1
+                    else:
+                        failed_count += 1
+
+                except Exception as e:
+                    logger.error(f"重新识别失败 {item.id}: {str(e)}")
+                    failed_count += 1
+
+            async def run_all():
+                tasks = [reprocess_item(item) for item in low_quality_items]
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+            loop.run_until_complete(run_all())
+            loop.close()
+
+        except Exception as e:
+            logger.error(f"批量重新识别失败: {str(e)}")
+            return UnifiedResponse.error(
+                message=f'重新识别失败: {str(e)}',
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        return UnifiedResponse.success(
+            message=f'重新识别完成: 成功 {success_count}, 失败 {failed_count}',
+            data={
+                'success_count': success_count,
+                'failed_count': failed_count
+            }
+        )

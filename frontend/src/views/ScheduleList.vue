@@ -365,9 +365,9 @@
       width="900px"
     >
       <el-table :data="logs" v-loading="logsLoading" max-height="400">
-        <el-table-column prop="started_at" label="执行时间" width="160">
+        <el-table-column prop="started_at" label="执行时间" width="170">
           <template #default="{ row }">
-            {{ formatDate(row.started_at) }}
+            {{ formatDateTime(row.started_at) }}
           </template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="80">
@@ -380,9 +380,9 @@
         <el-table-column prop="result_count" label="采集数量" width="90" />
         <el-table-column prop="matched_count" label="匹配数量" width="90" />
         <el-table-column prop="deleted_count" label="删除数量" width="90" />
-        <el-table-column prop="duration" label="耗时" width="80">
+        <el-table-column prop="duration" label="耗时" width="100">
           <template #default="{ row }">
-            {{ row.duration }}秒
+            {{ formatDuration(row.duration) }}
           </template>
         </el-table-column>
         <el-table-column prop="error_message" label="错误信息" min-width="200" show-overflow-tooltip />
@@ -419,7 +419,7 @@ import { crawlerApi } from '@/api/crawler'
 import { tenderApi } from '@/api/tender'
 import { enterpriseApi } from '@/api/enterprise'
 import { regionData } from '@/utils/regions'
-import { formatDate } from '@/utils/date'
+import { formatDate, formatDateTime } from '@/utils/date'
 
 const WEBSITE_TYPE_MAP = {
   'government': '政府采购网',
@@ -934,6 +934,19 @@ const parseCrontab = (crontab) => {
   }
 
   return desc
+}
+
+const formatDuration = (seconds) => {
+  if (!seconds && seconds !== 0) return '-'
+  if (seconds < 1) {
+    return `${(seconds * 1000).toFixed(0)}毫秒`
+  }
+  if (seconds < 60) {
+    return `${seconds.toFixed(1)}秒`
+  }
+  const mins = Math.floor(seconds / 60)
+  const secs = (seconds % 60).toFixed(1)
+  return `${mins}分${secs}秒`
 }
 
 const parseCrontabDesc = (crontab) => {

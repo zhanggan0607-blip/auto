@@ -1,6 +1,8 @@
 """
 URL configuration for bid_auto_system project.
 """
+import threading
+import time
 from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
@@ -12,6 +14,10 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, Sp
 from core.constants_views import ConstantsAPIView, ConstantsDetailAPIView
 from apps.openclaw.views import SystemModelsView
 from apps.knowledge.views import ProjectKnowledgeView, ProjectContextView
+
+
+_services_cache = {'data': None, 'expires': 0}
+_services_cache_lock = threading.Lock()
 
 
 def api_root(request):
@@ -71,168 +77,188 @@ def health_check(request):
     return JsonResponse(health_status, status=status_code)
 
 
+_services_cache = {'data': None, 'expires': 0}
+_services_cache_lock = threading.Lock()
+
 def system_services_status(request):
     """
     系统服务状态检查端点
-    检查所有相关服务的运行状态
+    核心服务快速同步检查，可选服务异步检查，结果缓存10秒
     """
     from django.utils import timezone
-    from celery import Celery
-    from django_celery_beat.models import PeriodicTask
+
+    cache_key = 'system_services_status_cache'
+    cached = cache.get(cache_key)
+    if cached:
+        return JsonResponse(cached)
+
+    with _services_cache_lock:
+        if _services_cache['data'] and _services_cache['expires'] > time.time():
+            cache.set(cache_key, _services_cache['data'], 10)
+            return JsonResponse(_services_cache['data'])
 
     services = []
     overall_status = 'healthy'
+    services_lock = threading.Lock()
 
-    services.append({
-        'name': 'Django Server',
-        'status': 'running',
-        'message': f'服务正常，当前时间: {timezone.now().strftime("%Y-%m-%d %H:%M:%S")}'
-    })
+    service_name_to_id = {}
+    display_name_to_db_name = {
+        'Django Server': 'django_server',
+        'PostgreSQL Database': 'postgresql_database',
+        'Redis Cache': 'redis_cache',
+        'Redis Queue': 'redis_cache',
+        'Celery Worker': 'celery_worker',
+        'Celery Beat': 'celery_beat',
+        'Chroma VectorDB': 'chroma_vector_db',
+        'Milvus VectorDB': 'milvus_vector_db',
+        'MinIO Storage': 'minio_storage',
+        'Ollama AI': 'ollama_ai',
+        'Frontend Dev Server': 'frontend_dev_server',
+        'Scheduled Tasks': 'scheduled_tasks',
+    }
+
+    try:
+        from apps.monitor.models import MonitoredService
+        for ms in MonitoredService.objects.all():
+            service_name_to_id[ms.name] = ms.id
+    except Exception:
+        pass
+
+    def add_service(name, status, message, db_id=None):
+        db_name = display_name_to_db_name.get(name, name)
+        with services_lock:
+            services.append({
+                'name': name,
+                'status': status,
+                'message': message,
+                'id': db_id if db_id is not None else service_name_to_id.get(db_name)
+            })
+
+    add_service('Django Server', 'running', f'服务正常，当前时间: {timezone.now().strftime("%Y-%m-%d %H:%M:%S")}')
 
     try:
         with connection.cursor() as cursor:
             cursor.execute('SELECT 1')
-        services.append({'name': 'PostgreSQL Database', 'status': 'running', 'message': '数据库连接正常'})
+        add_service('PostgreSQL Database', 'running', '数据库连接正常')
     except Exception as e:
-        services.append({'name': 'PostgreSQL Database', 'status': 'error', 'message': f'连接失败: {str(e)}'})
+        add_service('PostgreSQL Database', 'error', f'连接失败: {str(e)}')
         overall_status = 'unhealthy'
 
     try:
         cache.set('health_check', 'ok', 10)
         if cache.get('health_check') != 'ok':
             raise Exception('Cache not working')
-        services.append({'name': 'Redis Cache', 'status': 'running', 'message': 'Redis连接正常'})
+        add_service('Redis Cache', 'running', 'Redis连接正常')
     except Exception as e:
-        services.append({'name': 'Redis Cache', 'status': 'error', 'message': f'连接失败: {str(e)}'})
+        add_service('Redis Cache', 'error', f'连接失败: {str(e)}')
         overall_status = 'unhealthy'
 
-    try:
-        from config.celery import app as celery_app
-        inspect = celery_app.control.inspect()
-        stats = inspect.stats()
-        active = inspect.active()
+    def check_celery_async():
+        try:
+            from config.celery import app as celery_app
+            inspect = celery_app.control.inspect()
+            stats = inspect.stats()
+            if stats:
+                worker_count = len(stats)
+                add_service('Celery Worker', 'running', f'Worker运行中 ({worker_count} 个进程)')
+            else:
+                add_service('Celery Worker', 'stopped', '无Worker运行')
+        except Exception as e:
+            add_service('Celery Worker', 'error', f'检查失败: {str(e)}')
 
-        if stats:
-            worker_count = len(stats)
-            services.append({
-                'name': 'Celery Worker',
-                'status': 'running',
-                'message': f'Worker运行中 ({worker_count} 个进程)'
-            })
-        else:
-            services.append({'name': 'Celery Worker', 'status': 'stopped', 'message': '无Worker运行'})
-            overall_status = 'degraded'
+    celery_thread = threading.Thread(target=check_celery_async)
+    celery_thread.daemon = True
+    celery_thread.start()
 
-        beat_info = cache.get('celerybeat_info')
-        if beat_info:
-            services.append({'name': 'Celery Beat', 'status': 'running', 'message': '调度器运行中'})
-        else:
-            try:
-                periodic_tasks = PeriodicTask.objects.filter(enabled=True).count()
-                services.append({
-                'name': 'Celery Beat',
-                'status': 'running',
-                'message': f'调度器运行中 ({periodic_tasks} 个活跃任务)'
-            })
-            except:
-                services.append({'name': 'Celery Beat', 'status': 'stopped', 'message': '调度器未运行'})
-                overall_status = 'degraded'
-    except Exception as e:
-        services.append({'name': 'Celery Worker', 'status': 'error', 'message': f'检查失败: {str(e)}'})
-        services.append({'name': 'Celery Beat', 'status': 'unknown', 'message': '无法确定状态'})
+    def check_chroma_async():
+        try:
+            from services.vector import document_vector_store
+            count = document_vector_store.get_count()
+            add_service('Chroma VectorDB', 'running', f'向量库正常 ({count} 条数据)')
+        except Exception as e:
+            add_service('Chroma VectorDB', 'error', f'连接失败: {str(e)}')
 
-    try:
-        from services.vector import document_vector_store
-        count = document_vector_store.get_count()
-        services.append({'name': 'Chroma VectorDB', 'status': 'running', 'message': f'向量库正常 ({count} 条数据)'})
-    except Exception as e:
-        services.append({'name': 'Chroma VectorDB', 'status': 'error', 'message': f'连接失败: {str(e)}'})
-        overall_status = 'degraded'
+    chroma_thread = threading.Thread(target=check_chroma_async)
+    chroma_thread.daemon = True
+    chroma_thread.start()
 
-    try:
-        import redis
-        r = redis.from_url('redis://localhost:6379/0')
-        db_info = r.info('keyspace')
-        redis_version = r.info('server').get('redis_version', 'unknown')
-        services.append({
-            'name': 'Redis Queue',
-            'status': 'running',
-            'message': f'Redis {redis_version}, DB: {db_info.get("db0", {}).get("keys", 0)} keys'
-        })
-    except Exception as e:
-        services.append({'name': 'Redis Queue', 'status': 'error', 'message': f'连接失败: {str(e)}'})
-
-    try:
-        import pymilvus
-        connections.connect(alias='default', host='localhost', port='19530', timeout=5)
-        connections.connect(alias='default', host='localhost', port='19530', timeout=5)
-        services.append({'name': 'Milvus VectorDB', 'status': 'running', 'message': 'Milvus连接正常'})
-    except Exception as e:
-        services.append({'name': 'Milvus VectorDB', 'status': 'stopped', 'message': 'Milvus未运行（可选服务）'})
-
-    try:
-        schedules_count = PeriodicTask.objects.filter(enabled=True).count()
-        services.append({
-            'name': 'Scheduled Tasks',
-            'status': 'running',
-            'message': f'{schedules_count} 个定时任务已配置'
-        })
-    except Exception as e:
-        services.append({'name': 'Scheduled Tasks', 'status': 'unknown', 'message': f'检查失败: {str(e)}'})
-
-    try:
+    def check_optional_services():
         import urllib.request
         import ssl
+        import logging
+
+        logger = logging.getLogger(__name__)
+
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        req = urllib.request.Request('http://localhost:9000/minio/health/live', method='GET')
-        with urllib.request.urlopen(req, timeout=5, context=ctx) as response:
-            if response.status == 200:
-                services.append({'name': 'MinIO Storage', 'status': 'running', 'message': '对象存储服务正常'})
-            else:
-                raise Exception(f'Status: {response.status}')
-    except Exception as e:
-        services.append({'name': 'MinIO Storage', 'status': 'stopped', 'message': f'MinIO未运行（可选服务）'})
+
+        try:
+            req = urllib.request.Request('http://localhost:9000/minio/health/live', method='GET')
+            with urllib.request.urlopen(req, timeout=2, context=ctx) as response:
+                if response.status == 200:
+                    add_service('MinIO Storage', 'running', '对象存储服务正常')
+                else:
+                    raise Exception(f'Status: {response.status}')
+        except Exception as e:
+            logger.warning(f'MinIO检查失败: {e}')
+            add_service('MinIO Storage', 'stopped', 'MinIO未运行（可选服务）')
+
+        try:
+            req = urllib.request.Request('http://localhost:11434/api/tags', method='GET')
+            with urllib.request.urlopen(req, timeout=2) as response:
+                if response.status == 200:
+                    import json
+                    data = json.loads(response.read().decode())
+                    models = data.get('models', [])
+                    add_service('Ollama AI', 'running', f'Ollama服务正常 ({len(models)} 个模型)')
+                else:
+                    raise Exception(f'Status: {response.status}')
+        except Exception as e:
+            logger.warning(f'Ollama检查失败: {e}')
+            add_service('Ollama AI', 'stopped', 'Ollama未运行（AI功能不可用）')
+
+        try:
+            req = urllib.request.Request('http://localhost:9091/healthz', method='GET')
+            with urllib.request.urlopen(req, timeout=5, context=ctx) as response:
+                if response.status == 200:
+                    add_service('Milvus VectorDB', 'running', '向量数据库服务正常')
+                else:
+                    raise Exception(f'Status: {response.status}')
+        except Exception as e:
+            logger.warning(f'Milvus检查失败: {e}')
+            add_service('Milvus VectorDB', 'stopped', 'Milvus未运行（可选服务）')
+
+    optional_thread = threading.Thread(target=check_optional_services)
+    optional_thread.daemon = True
+    optional_thread.start()
 
     try:
-        import urllib.request
-        req = urllib.request.Request('http://localhost:11434/api/tags', method='GET')
-        with urllib.request.urlopen(req, timeout=5) as response:
-            if response.status == 200:
-                import json
-                data = json.loads(response.read().decode())
-                models = data.get('models', [])
-                services.append({
-                    'name': 'Ollama AI',
-                    'status': 'running',
-                    'message': f'Ollama服务正常 ({len(models)} 个模型)'
-                })
-            else:
-                raise Exception(f'Status: {response.status}')
+        from django_celery_beat.models import PeriodicTask
+        schedules_count = PeriodicTask.objects.filter(enabled=True).count()
+        add_service('Scheduled Tasks', 'running', f'{schedules_count} 个定时任务已配置')
     except Exception as e:
-        services.append({'name': 'Ollama AI', 'status': 'stopped', 'message': f'Ollama未运行（AI功能不可用）'})
+        add_service('Scheduled Tasks', 'unknown', f'检查失败: {str(e)}')
 
-    try:
-        from django.conf import settings
-        frontend_url = getattr(settings, 'FRONTEND_DEV_URL', 'http://localhost:8081')
-        import urllib.request
-        req = urllib.request.Request(frontend_url, method='GET')
-        with urllib.request.urlopen(req, timeout=5) as response:
-            if response.status == 200:
-                services.append({'name': 'Frontend Dev Server', 'status': 'running', 'message': '前端开发服务器正常'})
-            else:
-                raise Exception(f'Status: {response.status}')
-    except Exception as e:
-        services.append({'name': 'Frontend Dev Server', 'status': 'stopped', 'message': f'前端服务器未运行'})
+    celery_thread.join(timeout=2)
+    chroma_thread.join(timeout=2)
+    optional_thread.join(timeout=5)
 
-    status_code = 200 if overall_status in ['healthy', 'degraded'] else 503
-
-    return JsonResponse({
+    result = {
         'status': overall_status,
         'timestamp': timezone.now().isoformat(),
         'services': services
-    }, status=status_code)
+    }
+
+    with _services_cache_lock:
+        _services_cache['data'] = result
+        _services_cache['expires'] = time.time() + 10
+
+    cache.set(cache_key, result, 10)
+
+    status_code = 200 if overall_status in ['healthy', 'degraded'] else 503
+
+    return JsonResponse(result, status=status_code)
 
 
 urlpatterns = [

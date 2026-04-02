@@ -349,3 +349,191 @@ class BidProjectTracking(models.Model):
 
 
 from .scheduler_models import CrawlSchedule, CrawlScheduleLog
+
+
+class ContentRecognitionRule(models.Model):
+    """
+    内容识别规则模型 - 存储数据提取配置
+    """
+    name = models.CharField('规则名称', max_length=200)
+    code = models.CharField('规则编码', max_length=50, unique=True)
+
+    content_type = models.CharField(
+        '内容类型',
+        max_length=20,
+        choices=[
+            ('tender', '招标公告'),
+            ('enterprise', '企业信息'),
+            ('document', '文档'),
+            ('general', '通用'),
+        ],
+        default='general'
+    )
+
+    website_codes = models.JSONField(
+        '适用网站代码',
+        default=list,
+        blank=True,
+        help_text='适用该规则的网站代码列表，空列表表示适用所有网站'
+    )
+
+    field_mappings = models.JSONField(
+        '字段映射配置',
+        default=dict,
+        blank=True,
+        help_text='字段映射关系，如 {"title": ".title", "budget": ".budget span"}'
+    )
+
+    extraction_patterns = models.JSONField(
+        '提取模式',
+        default=dict,
+        blank=True,
+        help_text='正则表达式提取模式，如 {"phone": "\\d{3}-\\d{8}"}'
+    )
+
+    required_fields = models.JSONField(
+        '必填字段',
+        default=list,
+        blank=True,
+        help_text='必填字段列表'
+    )
+
+    optional_fields = models.JSONField(
+        '可选字段',
+        default=list,
+        blank=True,
+        help_text='可选字段列表'
+    )
+
+    validation_rules = models.JSONField(
+        '验证规则',
+        default=dict,
+        blank=True,
+        help_text='字段验证规则，如 {"budget": {"min": 0, "max": 100000000}}'
+    )
+
+    transform_rules = models.JSONField(
+        '转换规则',
+        default=dict,
+        blank=True,
+        help_text='数据转换规则，如 {"budget": "float", "date": "date"}'
+    )
+
+    quality_threshold = models.FloatField(
+        '质量阈值',
+        default=0.6,
+        help_text='最低质量分数阈值，低于此值标记为低质量'
+    )
+
+    is_active = models.BooleanField('是否启用', default=True)
+    priority = models.IntegerField('优先级', default=0)
+
+    created_at = models.DateTimeField('创建时间', default=timezone.now)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+
+    class Meta:
+        db_table = 'content_recognition_rules'
+        verbose_name = '内容识别规则'
+        verbose_name_plural = verbose_name
+        ordering = ['-priority', '-created_at']
+
+    def __str__(self):
+        return f'{self.name} ({self.content_type})'
+
+
+class RecognizedContent(models.Model):
+    """
+    已识别内容模型 - 存储结构化识别结果
+    """
+    source_url = models.URLField('来源URL', max_length=1000, db_index=True)
+    source_type = models.CharField(
+        '来源类型',
+        max_length=20,
+        choices=[
+            ('government', '政府采购'),
+            ('enterprise', '企业招标'),
+            ('other', '其他'),
+        ],
+        default='other'
+    )
+    content_type = models.CharField(
+        '内容类型',
+        max_length=20,
+        choices=[
+            ('tender', '招标公告'),
+            ('enterprise', '企业信息'),
+            ('document', '文档'),
+            ('general', '通用'),
+        ],
+        default='general'
+    )
+
+    title = models.CharField('标题', max_length=500, blank=True, null=True)
+    project_code = models.CharField('项目编号', max_length=100, blank=True, null=True)
+    region = models.CharField('地区', max_length=100, blank=True, null=True)
+    industry = models.CharField('行业', max_length=100, blank=True, null=True)
+
+    purchaser_name = models.CharField('采购人', max_length=300, blank=True, null=True)
+    agency_name = models.CharField('代理机构', max_length=300, blank=True, null=True)
+    budget = models.DecimalField('预算金额', max_digits=15, decimal_places=2, blank=True, null=True)
+    publish_date = models.DateField('发布日期', blank=True, null=True)
+    deadline_date = models.DateField('截止日期', blank=True, null=True)
+
+    extracted_data = models.JSONField(
+        '提取的完整数据',
+        default=dict,
+        blank=True,
+        help_text='提取的所有结构化数据'
+    )
+
+    raw_content = models.TextField('原始内容', blank=True, null=True)
+
+    quality_score = models.IntegerField(
+        '质量分数',
+        default=0,
+        help_text='0-100的质量分数'
+    )
+    quality_grade = models.CharField(
+        '质量等级',
+        max_length=1,
+        choices=[
+            ('A', '优秀'),
+            ('B', '良好'),
+            ('C', '一般'),
+            ('D', '较差'),
+        ],
+        blank=True,
+        null=True
+    )
+    quality_issues = models.JSONField('质量问题', default=list, blank=True)
+
+    rule = models.ForeignKey(
+        ContentRecognitionRule,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name='使用的识别规则',
+        related_name='recognized_contents'
+    )
+
+    is_processed = models.BooleanField('已处理', default=False)
+    processed_at = models.DateTimeField('处理时间', blank=True, null=True)
+
+    agent_id = models.CharField('Agent ID', max_length=50, blank=True, null=True)
+
+    created_at = models.DateTimeField('创建时间', default=timezone.now)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+
+    class Meta:
+        db_table = 'recognized_contents'
+        verbose_name = '已识别内容'
+        verbose_name_plural = verbose_name
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['content_type', 'quality_grade']),
+            models.Index(fields=['source_type', 'publish_date']),
+            models.Index(fields=['is_processed', 'quality_score']),
+        ]
+
+    def __str__(self):
+        return f'{self.title[:30] if self.title else "Unknown"} - {self.quality_grade}'

@@ -138,7 +138,7 @@
           <el-input
             v-model="formData.password"
             type="password"
-            placeholder="请输入密码（至少8位）"
+            placeholder="请输入密码（至少8位，必须包含字母和数字）"
             show-password
           />
         </el-form-item>
@@ -181,7 +181,6 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, Refresh } from '@element-plus/icons-vue'
 import { useUserStore } from '@/store/user'
-import { userAdminApi } from '@/api/userAdmin'
 import { PageHeader } from '@/components'
 
 const userStore = useUserStore()
@@ -225,7 +224,9 @@ const formRules = {
   ],
   password: [
     { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 8, message: '密码长度至少8位', trigger: 'blur' }
+    { min: 8, message: '密码长度至少8位', trigger: 'blur' },
+    { pattern: /[A-Za-z]/, message: '密码必须包含字母', trigger: 'blur' },
+    { pattern: /\d/, message: '密码必须包含数字', trigger: 'blur' }
   ],
   password_confirm: [
     { required: true, message: '请确认密码', trigger: 'blur' }
@@ -258,11 +259,15 @@ const fetchUserList = async () => {
     })
 
     const res = await userAdminApi.list(params)
-    userList.value = res.data.results || res.data.list || []
-    pagination.total = res.data.count || res.data.total || 0
+    const data = res?.data || res
+    userList.value = Array.isArray(data?.results) ? data.results :
+                     Array.isArray(data?.list) ? data.list :
+                     Array.isArray(data) ? data : []
+    pagination.total = data?.count || data?.total || 0
   } catch (error) {
     console.error('获取用户列表失败:', error)
     ElMessage.error('获取用户列表失败')
+    userList.value = []
   } finally {
     loading.value = false
   }
@@ -381,7 +386,7 @@ const handleDelete = async (row) => {
       }
     )
     await userAdminApi.delete(row.id)
-    ElMessage.success('删除成功')
+    ElMessage.success('用户已禁用')
     fetchUserList()
   } catch (error) {
     if (error !== 'cancel') {

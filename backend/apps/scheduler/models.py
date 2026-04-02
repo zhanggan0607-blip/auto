@@ -174,7 +174,7 @@ class ScheduleExecutionLog(models.Model):
         self.result = result
         self.error_message = error
         self.finished_at = timezone.now()
-        self.duration = (self.finished_at - self.started_at).seconds
+        self.duration = (self.finished_at - self.started_at).total_seconds()
         self.save()
 
         self.schedule.last_run_at = self.started_at

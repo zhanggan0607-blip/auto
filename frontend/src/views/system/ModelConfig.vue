@@ -176,7 +176,6 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Sort } from '@element-plus/icons-vue'
-import { modelApi } from '@/api/model'
 
 const refreshing = ref(false)
 const checkingOllama = ref(false)

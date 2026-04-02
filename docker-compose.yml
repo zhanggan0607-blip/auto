@@ -1,8 +1,6 @@
 # 投标自动化系统 - Docker Compose配置
 # 架构: Django + FastAPI双层架构, Celery+Redis任务队列, Milvus向量库
 
-version: '3.8'
-
 services:
   # ==================== 基础设施服务 ====================
 
@@ -261,7 +259,6 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: bid-backend
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.production
       DB_HOST: postgres-master
@@ -317,7 +314,6 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.fastapi
-    container_name: bid-fastapi
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.production
       REDIS_HOST: redis-celery
@@ -357,7 +353,6 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: bid-celery-worker
     command: celery -A config worker -l info -Q default,workflow,notification --concurrency=4
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.production
@@ -388,7 +383,6 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: bid-celery-crawler
     command: celery -A config worker -l info -Q crawler,vector --concurrency=2
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.production
@@ -419,7 +413,6 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: bid-celery-beat
     command: celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.production
@@ -446,7 +439,6 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: bid-frontend
     ports:
       - "80:80"
     depends_on:

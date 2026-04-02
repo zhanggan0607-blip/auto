@@ -327,9 +327,23 @@
               <el-table :data="qualifications" size="small" stripe v-loading="qualificationLoading">
                 <el-table-column prop="qualification_category_display" label="资质类别" width="100" />
                 <el-table-column prop="qualification_name_display" label="资质名称" min-width="180" />
-                <el-table-column prop="grade_display" label="等级" width="120" />
+                <el-table-column prop="grade_display" label="等级" width="80" />
                 <el-table-column prop="certificate_no" label="资质证书号" width="150" />
                 <el-table-column prop="expiry_date" label="有效期" width="120" />
+                <el-table-column label="证书文件" width="100">
+                  <template #default="{ row }">
+                    <el-button
+                      v-if="row.certificate_file"
+                      type="primary"
+                      link
+                      size="small"
+                      @click="previewQualificationFileFromList(row)"
+                    >
+                      <el-icon><View /></el-icon>查看
+                    </el-button>
+                    <span v-else>-</span>
+                  </template>
+                </el-table-column>
                 <el-table-column label="操作" width="120" fixed="right">
                   <template #default="{ row }">
                     <el-button type="primary" link size="small" @click="editQualification(row)">编辑</el-button>
@@ -715,6 +729,11 @@
               </div>
             </template>
           </el-upload>
+          <div v-if="selectedDocumentFile" class="file-preview-trigger">
+            <el-button type="info" size="small" @click="previewSelectedDocument">
+              <el-icon><View /></el-icon>预览文件
+            </el-button>
+          </div>
         </el-form-item>
         <el-form-item label="自动识别">
           <el-switch v-model="documentForm.auto_recognize" />
@@ -726,18 +745,8 @@
         <el-button type="primary" @click="submitDocument" :loading="documentSubmitting">确定</el-button>
       </template>
     </el-dialog>
-    
-    <el-dialog v-model="previewDialogVisible" title="证书预览" width="80%" top="5vh">
-      <div class="preview-container">
-        <img v-if="previewType === 'image'" :src="previewUrl" class="preview-image">
-        <iframe v-else-if="previewType === 'pdf'" :src="previewUrl" class="preview-iframe" />
-        <div v-else class="preview-unsupported">
-          <el-icon><Document /></el-icon>
-          <p>该文件类型不支持在线预览</p>
-          <el-button type="primary" @click="downloadDocument(previewDoc)">下载文件</el-button>
-        </div>
-      </div>
-    </el-dialog>
+
+    <image-viewer ref="imageViewerRef" />
     
     <el-dialog v-model="personnelDialogVisible" :title="personnelDialogTitle" width="900px" top="3vh" destroy-on-close>
       <el-form :model="personnelForm" :rules="personnelFormRules" ref="personnelFormRef" label-width="130px">
@@ -858,7 +867,12 @@
                   >
                     <el-button type="primary" size="small">上传文件</el-button>
                   </el-upload>
-                  <span v-if="personnelForm.builder_certificate_file_name" class="file-name">{{ personnelForm.builder_certificate_file_name }}</span>
+                  <div v-if="personnelForm.builder_certificate_file_name" class="file-item-actions">
+                    <span class="file-name">{{ personnelForm.builder_certificate_file_name }}</span>
+                    <el-button type="info" size="small" link @click="previewPersonnelFile('builder_certificate_file')">
+                      <el-icon><View /></el-icon>
+                    </el-button>
+                  </div>
                 </el-form-item>
               </el-col>
               <el-col :span="12" v-if="personnelForm.personnel_type === 'project_manager'">
@@ -871,7 +885,12 @@
                   >
                     <el-button type="primary" size="small">上传文件</el-button>
                   </el-upload>
-                  <span v-if="personnelForm.safety_certificate_b_file_name" class="file-name">{{ personnelForm.safety_certificate_b_file_name }}</span>
+                  <div v-if="personnelForm.safety_certificate_b_file_name" class="file-item-actions">
+                    <span class="file-name">{{ personnelForm.safety_certificate_b_file_name }}</span>
+                    <el-button type="info" size="small" link @click="previewPersonnelFile('safety_certificate_b_file')">
+                      <el-icon><View /></el-icon>
+                    </el-button>
+                  </div>
                 </el-form-item>
               </el-col>
               <el-col :span="12" v-if="['technical_director', 'professional_engineer'].includes(personnelForm.personnel_type)">
@@ -884,7 +903,12 @@
                   >
                     <el-button type="primary" size="small">上传文件</el-button>
                   </el-upload>
-                  <span v-if="personnelForm.engineer_certificate_file_name" class="file-name">{{ personnelForm.engineer_certificate_file_name }}</span>
+                  <div v-if="personnelForm.engineer_certificate_file_name" class="file-item-actions">
+                    <span class="file-name">{{ personnelForm.engineer_certificate_file_name }}</span>
+                    <el-button type="info" size="small" link @click="previewPersonnelFile('engineer_certificate_file')">
+                      <el-icon><View /></el-icon>
+                    </el-button>
+                  </div>
                 </el-form-item>
               </el-col>
               <el-col :span="12">
@@ -897,7 +921,12 @@
                   >
                     <el-button type="primary" size="small">上传文件</el-button>
                   </el-upload>
-                  <span v-if="personnelForm.social_security_proof_name" class="file-name">{{ personnelForm.social_security_proof_name }}</span>
+                  <div v-if="personnelForm.social_security_proof_name" class="file-item-actions">
+                    <span class="file-name">{{ personnelForm.social_security_proof_name }}</span>
+                    <el-button type="info" size="small" link @click="previewPersonnelFile('social_security_proof')">
+                      <el-icon><View /></el-icon>
+                    </el-button>
+                  </div>
                 </el-form-item>
               </el-col>
               <el-col :span="12">
@@ -910,7 +939,12 @@
                   >
                     <el-button type="primary" size="small">上传文件</el-button>
                   </el-upload>
-                  <span v-if="personnelForm.no_ongoing_commitment_name" class="file-name">{{ personnelForm.no_ongoing_commitment_name }}</span>
+                  <div v-if="personnelForm.no_ongoing_commitment_name" class="file-item-actions">
+                    <span class="file-name">{{ personnelForm.no_ongoing_commitment_name }}</span>
+                    <el-button type="info" size="small" link @click="previewPersonnelFile('no_ongoing_commitment')">
+                      <el-icon><View /></el-icon>
+                    </el-button>
+                  </div>
                 </el-form-item>
               </el-col>
               <el-col :span="12">
@@ -923,7 +957,12 @@
                   >
                     <el-button type="primary" size="small">上传文件</el-button>
                   </el-upload>
-                  <span v-if="personnelForm.labor_contract_name" class="file-name">{{ personnelForm.labor_contract_name }}</span>
+                  <div v-if="personnelForm.labor_contract_name" class="file-item-actions">
+                    <span class="file-name">{{ personnelForm.labor_contract_name }}</span>
+                    <el-button type="info" size="small" link @click="previewPersonnelFile('labor_contract')">
+                      <el-icon><View /></el-icon>
+                    </el-button>
+                  </div>
                 </el-form-item>
               </el-col>
               <el-col :span="12">
@@ -936,7 +975,12 @@
                   >
                     <el-button type="primary" size="small">上传文件</el-button>
                   </el-upload>
-                  <span v-if="personnelForm.similar_performance_proof_name" class="file-name">{{ personnelForm.similar_performance_proof_name }}</span>
+                  <div v-if="personnelForm.similar_performance_proof_name" class="file-item-actions">
+                    <span class="file-name">{{ personnelForm.similar_performance_proof_name }}</span>
+                    <el-button type="info" size="small" link @click="previewPersonnelFile('similar_performance_proof')">
+                      <el-icon><View /></el-icon>
+                    </el-button>
+                  </div>
                 </el-form-item>
               </el-col>
               <el-col :span="12">
@@ -968,7 +1012,18 @@
         <el-button type="primary" @click="savePersonnel" :loading="personnelSaving">保存</el-button>
       </template>
     </el-dialog>
-    
+
+    <el-dialog v-model="personnelPreviewVisible" title="文件预览" width="80%" top="5vh">
+      <div class="preview-container">
+        <img v-if="personnelPreviewType === 'image'" :src="personnelPreviewUrl" class="preview-image">
+        <iframe v-else-if="personnelPreviewType === 'pdf'" :src="personnelPreviewUrl" class="preview-iframe" />
+        <div v-else class="preview-unsupported">
+          <el-icon><Document /></el-icon>
+          <p>该文件类型不支持在线预览</p>
+        </div>
+      </div>
+    </el-dialog>
+
     <el-dialog v-model="qualificationDialogVisible" :title="qualificationDialogTitle" width="700px" destroy-on-close>
       <el-form :model="qualificationForm" :rules="qualificationFormRules" ref="qualificationFormRef" label-width="100px">
         <el-row :gutter="20">
@@ -1233,6 +1288,28 @@
               <el-switch v-model="qualificationForm.is_primary" active-text="是" inactive-text="否" />
             </el-form-item>
           </el-col>
+          <el-col :span="24">
+            <el-form-item label="证书文件">
+              <el-upload
+                :auto-upload="false"
+                :limit="1"
+                :on-change="(file) => handleQualificationFileChange(file, 'certificate_file')"
+                :on-remove="() => handleQualificationFileRemove('certificate_file')"
+                accept=".pdf,.jpg,.jpeg,.png"
+              >
+                <el-button type="primary" size="small">上传文件</el-button>
+              </el-upload>
+              <div v-if="qualificationForm.certificate_file_name" class="file-item-actions">
+                <span class="file-name">{{ qualificationForm.certificate_file_name }}</span>
+                <el-button type="info" size="small" link @click="previewQualificationFile">
+                  <el-icon><View /></el-icon>
+                </el-button>
+                <el-button type="danger" size="small" link @click="handleQualificationFileRemove('certificate_file')">
+                  <el-icon><Delete /></el-icon>
+                </el-button>
+              </div>
+            </el-form-item>
+          </el-col>
         </el-row>
       </el-form>
       <template #footer>
@@ -1240,7 +1317,7 @@
         <el-button type="primary" @click="saveQualification" :loading="qualificationSaving">保存</el-button>
       </template>
     </el-dialog>
-    
+
     <el-dialog v-model="performanceDialogVisible" :title="performanceDialogTitle" width="800px" destroy-on-close>
       <el-form :model="performanceForm" :rules="performanceFormRules" ref="performanceFormRef" label-width="100px">
         <el-row :gutter="20">
@@ -1462,13 +1539,16 @@
 <script setup>
 import { ref, reactive, onMounted, computed, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { 
-  Connection, Plus, Edit, Delete, OfficeBuilding, Document, 
+import {
+  Connection, Plus, Edit, Delete, OfficeBuilding, Document,
   Location, Select, Upload, View, Star
 } from '@element-plus/icons-vue'
 import { enterpriseApi } from '@/api/enterprise'
 import { regionData, getRegionValue, parseRegionValue } from '@/utils/regions'
 import { getContactTypeText, getMatchRuleTypeText } from '@/store/constants'
+import ImageViewer from '@/components/ImageViewer.vue'
+
+const imageViewerRef = ref(null)
 
 const enterpriseList = ref([])
 const windowWidth = ref(window.innerWidth)
@@ -1524,6 +1604,9 @@ const personnelSaving = ref(false)
 const personnelFormRef = ref(null)
 const personnelCollapseActive = ref(['basic', 'certificate', 'files', 'other'])
 const personnelFiles = ref({})
+const personnelPreviewVisible = ref(false)
+const personnelPreviewUrl = ref('')
+const personnelPreviewType = ref('')
 
 const projectManagers = computed(() => keyPersonnel.value.filter(p => p.personnel_type === 'project_manager'))
 const technicalDirectors = computed(() => keyPersonnel.value.filter(p => p.personnel_type === 'technical_director'))
@@ -1549,8 +1632,17 @@ const defaultPersonnelForm = {
   id_number: '',
   birth_date: '',
   builder_certificate: '',
+  builder_certificate_file: null,
+  builder_certificate_file_url: '',
+  builder_certificate_file_name: '',
   safety_certificate_b: '',
+  safety_certificate_b_file: null,
+  safety_certificate_b_file_url: '',
+  safety_certificate_b_file_name: '',
   engineer_title_certificate: '',
+  engineer_certificate_file: null,
+  engineer_certificate_file_url: '',
+  engineer_certificate_file_name: '',
   certificate_number: '',
   certificate_major: '',
   expiry_date: '',
@@ -1559,6 +1651,18 @@ const defaultPersonnelForm = {
   title_level: '',
   is_registered_locally: true,
   social_security_code: '',
+  social_security_proof: null,
+  social_security_proof_url: '',
+  social_security_proof_name: '',
+  no_ongoing_commitment: null,
+  no_ongoing_commitment_url: '',
+  no_ongoing_commitment_name: '',
+  labor_contract: null,
+  labor_contract_url: '',
+  labor_contract_name: '',
+  similar_performance_proof: null,
+  similar_performance_proof_url: '',
+  similar_performance_proof_name: '',
   professional_years: null,
   phone: '',
   is_available: true,
@@ -1584,10 +1688,14 @@ const defaultQualificationForm = {
   expiry_date: '',
   issuing_authority: '',
   is_valid: true,
-  is_primary: false
+  is_primary: false,
+  certificate_file: null,
+  certificate_file_url: '',
+  certificate_file_name: ''
 }
 
 const qualificationForm = reactive({ ...defaultQualificationForm })
+const qualificationFiles = ref({})
 
 const qualificationFormRules = {
   qualification_category: [{ required: true, message: '请选择资质类别', trigger: 'change' }],
@@ -1636,6 +1744,9 @@ const documentOptions = ref({
   document_types: {},
   document_statuses: {}
 })
+const documentPreviewVisible = ref(false)
+const documentPreviewUrl = ref('')
+const documentPreviewType = ref('')
 
 const documentTypeOptions = computed(() => {
   const options = documentOptions.value
@@ -1820,6 +1931,45 @@ const handleDocumentExceed = () => {
   ElMessage.warning('只能上传一个文件')
 }
 
+const previewSelectedDocument = () => {
+  if (!selectedDocumentFile.value) {
+    ElMessage.warning('请先选择文件')
+    return
+  }
+
+  const file = selectedDocumentFile.value
+  const ext = file.name.split('.').pop().toLowerCase()
+
+  if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext)) {
+    imageViewerRef.value?.open([{
+      url: URL.createObjectURL(file),
+      name: file.name
+    }], 0)
+  } else if (ext === 'pdf') {
+    documentPreviewType.value = 'pdf'
+    documentPreviewUrl.value = URL.createObjectURL(file)
+    documentPreviewVisible.value = true
+  } else {
+    ElMessage.info('该文件类型不支持在线预览，请下载后查看')
+  }
+}
+
+const downloadSelectedDocument = () => {
+  if (!selectedDocumentFile.value) {
+    ElMessage.warning('请先选择文件')
+    return
+  }
+
+  const file = selectedDocumentFile.value
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(file)
+  link.download = file.name
+  link.target = '_blank'
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+}
+
 const submitDocument = async () => {
   if (!documentFormRef.value) return
   
@@ -1862,20 +2012,22 @@ const previewDocument = (row) => {
     ElMessage.warning('该证书没有可预览的文件')
     return
   }
-  
+
   previewDoc.value = row
-  previewUrl.value = row.file_url
-  
   const ext = row.file_url.split('.').pop().toLowerCase()
-  if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) {
-    previewType.value = 'image'
+
+  if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext)) {
+    imageViewerRef.value?.open([{
+      url: row.file_url,
+      name: row.document_name || row.file_name || '证书图片'
+    }], 0)
   } else if (ext === 'pdf') {
+    previewUrl.value = row.file_url
     previewType.value = 'pdf'
+    previewDialogVisible.value = true
   } else {
-    previewType.value = 'unsupported'
+    ElMessage.info('该文件类型不支持在线预览，请下载后查看')
   }
-  
-  previewDialogVisible.value = true
 }
 
 const downloadDocument = (row) => {
@@ -2071,6 +2223,16 @@ const editQualification = (row) => {
       qualificationForm[key] = value
     }
   })
+  if (row.certificate_file) {
+    qualificationForm.certificate_file = null
+    qualificationForm.certificate_file_url = row.certificate_file
+    let fileName = row.certificate_file?.split('/').pop() || '证书文件'
+    try {
+      fileName = decodeURIComponent(fileName)
+    } catch (e) {}
+    qualificationForm.certificate_file_name = fileName
+  }
+  qualificationFiles.value = {}
   qualificationForm.id = row.id
   qualificationDialogVisible.value = true
 }
@@ -2106,17 +2268,43 @@ const saveQualification = async () => {
 
     qualificationSaving.value = true
     try {
-      const data = { ...qualificationForm }
-      delete data.id
+      const hasFile = qualificationFiles.value.certificate_file
 
-      if (!data.issue_date) data.issue_date = null
-      if (!data.expiry_date) data.expiry_date = null
+      if (hasFile) {
+        const formData = new FormData()
+        formData.append('enterprise', qualificationForm.enterprise)
+        formData.append('qualification_category', qualificationForm.qualification_category)
+        formData.append('qualification_name', qualificationForm.qualification_name)
+        if (qualificationForm.grade) formData.append('grade', qualificationForm.grade)
+        if (qualificationForm.certificate_no) formData.append('certificate_no', qualificationForm.certificate_no)
+        if (qualificationForm.issue_date) formData.append('issue_date', qualificationForm.issue_date)
+        if (qualificationForm.expiry_date) formData.append('expiry_date', qualificationForm.expiry_date)
+        if (qualificationForm.issuing_authority) formData.append('issuing_authority', qualificationForm.issuing_authority)
+        formData.append('is_valid', qualificationForm.is_valid)
+        formData.append('is_primary', qualificationForm.is_primary)
+        formData.append('certificate_file', qualificationFiles.value.certificate_file)
 
-      if (qualificationForm.id) {
-        await enterpriseApi.updateQualification(qualificationForm.id, data)
+        if (qualificationForm.id) {
+          await enterpriseApi.updateQualification(qualificationForm.id, formData)
+        } else {
+          await enterpriseApi.createQualification(formData)
+        }
       } else {
-        await enterpriseApi.createQualification(data)
+        const data = { ...qualificationForm }
+        delete data.id
+        delete data.certificate_file_url
+        delete data.certificate_file_name
+
+        if (!data.issue_date) data.issue_date = null
+        if (!data.expiry_date) data.expiry_date = null
+
+        if (qualificationForm.id) {
+          await enterpriseApi.updateQualification(qualificationForm.id, data)
+        } else {
+          await enterpriseApi.createQualification(data)
+        }
       }
+
       ElMessage.success('保存成功')
       qualificationDialogVisible.value = false
       if (selectedEnterprise.value) {
@@ -2129,6 +2317,89 @@ const saveQualification = async () => {
       qualificationSaving.value = false
     }
   })
+}
+
+const handleQualificationFileChange = (file, field) => {
+  qualificationFiles.value[field] = file.raw
+  qualificationForm[`${field}_name`] = file.name
+}
+
+const handleQualificationFileRemove = (field) => {
+  qualificationFiles.value[field] = null
+  qualificationForm[`${field}_name`] = ''
+  qualificationForm[`${field}_url`] = ''
+}
+
+const previewQualificationFile = async () => {
+  const file = qualificationFiles.value.certificate_file
+  if (file) {
+    const ext = file.name.split('.').pop().toLowerCase()
+    if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext)) {
+      imageViewerRef.value?.open([{
+        url: URL.createObjectURL(file),
+        name: file.name
+      }], 0)
+    } else if (ext === 'pdf') {
+      personnelPreviewUrl.value = URL.createObjectURL(file)
+      personnelPreviewType.value = 'pdf'
+      personnelPreviewVisible.value = true
+    } else {
+      ElMessage.info('该文件类型不支持在线预览')
+    }
+    return
+  }
+
+  const fileUrl = qualificationForm.certificate_file_url
+  if (fileUrl) {
+    const ext = fileUrl.split('.').pop().toLowerCase()
+    if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext)) {
+      imageViewerRef.value?.open([{
+        url: fileUrl,
+        name: qualificationForm.certificate_file_name || '证书文件'
+      }], 0)
+    } else if (ext === 'pdf') {
+      try {
+        const response = await fetch(fileUrl, { credentials: 'include' })
+        if (!response.ok) throw new Error('Failed to fetch PDF')
+        const blob = await response.blob()
+        personnelPreviewUrl.value = URL.createObjectURL(blob)
+        personnelPreviewType.value = 'pdf'
+        personnelPreviewVisible.value = true
+      } catch (error) {
+        console.error('PDF预览失败:', error)
+        ElMessage.error('PDF预览失败，请尝试下载后查看')
+      }
+    } else {
+      ElMessage.info('该文件类型不支持在线预览')
+    }
+  }
+}
+
+const previewQualificationFileFromList = async (row) => {
+  if (row.certificate_file) {
+    const fileUrl = row.certificate_file
+    const ext = fileUrl.split('.').pop().toLowerCase()
+    if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext)) {
+      imageViewerRef.value?.open([{
+        url: fileUrl,
+        name: row.certificate_no || '证书文件'
+      }], 0)
+    } else if (ext === 'pdf') {
+      try {
+        const response = await fetch(fileUrl, { credentials: 'include' })
+        if (!response.ok) throw new Error('Failed to fetch PDF')
+        const blob = await response.blob()
+        personnelPreviewUrl.value = URL.createObjectURL(blob)
+        personnelPreviewType.value = 'pdf'
+        personnelPreviewVisible.value = true
+      } catch (error) {
+        console.error('PDF预览失败:', error)
+        ElMessage.error('PDF预览失败，请尝试下载后查看')
+      }
+    } else {
+      ElMessage.info('该文件类型不支持在线预览')
+    }
+  }
 }
 
 const showAddPerformanceDialog = () => {
@@ -2230,6 +2501,30 @@ const editPersonnel = (row) => {
   })
   personnelForm.id = row.id
   personnelFiles.value = {}
+
+  const urlToNameMap = {
+    'builder_certificate_file_url': 'builder_certificate_file_name',
+    'safety_certificate_b_file_url': 'safety_certificate_b_file_name',
+    'engineer_certificate_file_url': 'engineer_certificate_file_name',
+    'social_security_proof_url': 'social_security_proof_name',
+    'no_ongoing_commitment_url': 'no_ongoing_commitment_name',
+    'labor_contract_url': 'labor_contract_name',
+    'similar_performance_proof_url': 'similar_performance_proof_name'
+  }
+
+  Object.keys(urlToNameMap).forEach(urlKey => {
+    const nameKey = urlToNameMap[urlKey]
+    if (personnelForm[urlKey] && !personnelForm[nameKey]) {
+      const url = personnelForm[urlKey]
+      let fileName = url.split('/').pop() || url.split('?')[0].split('/').pop()
+      try {
+        fileName = decodeURIComponent(fileName)
+      } catch (e) {
+      }
+      personnelForm[nameKey] = fileName
+    }
+  })
+
   personnelCollapseActive.value = ['basic', 'certificate', 'files', 'other']
   personnelDialogVisible.value = true
 }
@@ -2262,21 +2557,85 @@ const handlePersonnelFileChange = (file, field) => {
   personnelForm[`${field}_name`] = file.name
 }
 
+const previewPersonnelFile = async (field) => {
+  const file = personnelFiles.value[field]
+  if (file) {
+    const ext = file.name.split('.').pop().toLowerCase()
+
+    if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext)) {
+      imageViewerRef.value?.open([{
+        url: URL.createObjectURL(file),
+        name: file.name
+      }], 0)
+    } else if (ext === 'pdf') {
+      personnelPreviewUrl.value = URL.createObjectURL(file)
+      personnelPreviewType.value = 'pdf'
+      personnelPreviewVisible.value = true
+    } else {
+      ElMessage.info('该文件类型不支持在线预览')
+    }
+    return
+  }
+
+  const urlField = `${field}_url`
+  const fileUrl = personnelForm[urlField]
+  if (fileUrl) {
+    const ext = fileUrl.split('.').pop().toLowerCase()
+
+    if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext)) {
+      imageViewerRef.value?.open([{
+        url: fileUrl,
+        name: personnelForm[`${field}_name`] || '文件预览'
+      }], 0)
+    } else if (ext === 'pdf') {
+      try {
+        const response = await fetch(fileUrl, { credentials: 'include' })
+        if (!response.ok) throw new Error('Failed to fetch PDF')
+        const blob = await response.blob()
+        personnelPreviewUrl.value = URL.createObjectURL(blob)
+        personnelPreviewType.value = 'pdf'
+        personnelPreviewVisible.value = true
+      } catch (error) {
+        console.error('PDF预览失败:', error)
+        ElMessage.error('PDF预览失败，请尝试下载后查看')
+      }
+    } else {
+      ElMessage.info('该文件类型不支持在线预览')
+    }
+    return
+  }
+
+  ElMessage.warning('请先上传文件')
+}
+
 const savePersonnel = async () => {
   if (!personnelFormRef.value) return
-  
+
   await personnelFormRef.value.validate(async (valid) => {
     if (!valid) return
-    
+
     personnelSaving.value = true
     try {
       const formData = new FormData()
+      const fileFields = [
+        'builder_certificate_file',
+        'safety_certificate_b_file',
+        'engineer_certificate_file',
+        'social_security_proof',
+        'no_ongoing_commitment',
+        'labor_contract',
+        'similar_performance_proof'
+      ]
+
       Object.keys(personnelForm).forEach(key => {
         if (personnelForm[key] !== null && personnelForm[key] !== '' && !key.endsWith('_name')) {
+          if (fileFields.includes(key)) {
+            return
+          }
           formData.append(key, personnelForm[key])
         }
       })
-      
+
       Object.keys(personnelFiles.value).forEach(key => {
         if (personnelFiles.value[key]) {
           formData.append(key, personnelFiles.value[key])
@@ -2837,6 +3196,17 @@ const saveMatchRule = async () => {
 .preview-unsupported .el-icon {
   font-size: 64px;
   margin-bottom: 20px;
+}
+
+.file-preview-trigger {
+  margin-top: 10px;
+}
+
+.file-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
 }
 
 .personnel-sub-tabs {

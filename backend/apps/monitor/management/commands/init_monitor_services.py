@@ -80,6 +80,15 @@ class Command(BaseCommand):
                 'health_check_url': 'http://localhost:8081',
                 'is_critical': False,
             },
+            {
+                'name': 'milvus_vector_db',
+                'display_name': 'Milvus 向量数据库',
+                'category': 'ai',
+                'description': '向量数据库服务（Docker容器）',
+                'health_check_type': 'tcp',
+                'health_check_port': 19530,
+                'is_critical': False,
+            },
         ]
 
         created_count = 0

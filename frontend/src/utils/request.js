@@ -251,17 +251,84 @@ axiosInstance.interceptors.response.use(
         }
       } else if (status === 500) {
         if (!skipErrorMessage) {
-          ElMessage.error('服务器错误')
+          const errorData = error.response?.data
+          let errorMsg = '服务器错误'
+          if (errorData != null) {
+            if (typeof errorData === 'object') {
+              if (typeof errorData.error === 'string' && errorData.error) {
+                errorMsg = errorData.error
+              } else if (typeof errorData.message === 'string' && errorData.message) {
+                errorMsg = errorData.message
+              } else if (typeof errorData.detail === 'string' && errorData.detail) {
+                errorMsg = errorData.detail
+              }
+            } else if (typeof errorData === 'string' && errorData.length > 0) {
+              errorMsg = errorData.substring(0, 200)
+            }
+          }
+          ElMessage.error(errorMsg)
         }
-      } else {
-        if (!skipErrorMessage) {
-          ElMessage.error(error.response.data?.message || '请求失败')
+      } else if (status === 400) {
+        const errorData = error.response.data
+        let errorMsg = '请求参数错误'
+        if (errorData && typeof errorData === 'object') {
+          if (errorData.errors && typeof errorData.errors === 'object') {
+            const messages = []
+            for (const [field, err] of Object.entries(errorData.errors)) {
+              if (Array.isArray(err)) {
+                messages.push(`${field}: ${err.join(', ')}`)
+              } else if (typeof err === 'string') {
+                messages.push(`${field}: ${err}`)
+              } else if (err && typeof err === 'object' && err.message) {
+                messages.push(`${field}: ${err.message}`)
+              }
+            }
+            if (messages.length > 0) {
+              errorMsg = messages.join('\n')
+              if (!skipErrorMessage) {
+                ElMessage.error(errorMsg)
+              }
+            } else if (!skipErrorMessage) {
+              ElMessage.error(errorData.message || errorMsg)
+            }
+          } else if (errorData.detail) {
+            errorMsg = errorData.detail
+            if (!skipErrorMessage) {
+              ElMessage.error(errorMsg)
+            }
+          } else if (errorData.message) {
+            errorMsg = errorData.message
+            if (!skipErrorMessage) {
+              ElMessage.error(errorMsg)
+            }
+          } else {
+            const messages = []
+            for (const [field, errors] of Object.entries(errorData)) {
+              if (Array.isArray(errors)) {
+                messages.push(`${field}: ${errors.join(', ')}`)
+              } else if (typeof errors === 'string') {
+                messages.push(`${field}: ${errors}`)
+              }
+            }
+            if (messages.length > 0) {
+              errorMsg = messages.join('\n')
+              if (!skipErrorMessage) {
+                ElMessage.error(errorMsg)
+              }
+            } else if (!skipErrorMessage) {
+              ElMessage.error(errorMsg)
+            }
+          }
+        } else if (!skipErrorMessage) {
+          ElMessage.error(errorMsg)
         }
+        error.message = errorMsg
       }
     } else {
       if (!originalRequest?.skipErrorMessage) {
         ElMessage.error('网络错误，请检查网络连接')
       }
+      error.message = '网络错误，请检查网络连接'
     }
 
     if (originalRequest?.requestTag) {
@@ -321,6 +388,14 @@ const request = {
    * @returns {Promise}
    */
   patch(url, data = {}, options = {}) {
+    if (data instanceof FormData) {
+      return axiosInstance.patch(url, data, {
+        ...options,
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      })
+    }
     return axiosInstance.patch(url, data, options)
   },
 
