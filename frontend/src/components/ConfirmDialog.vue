@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <el-dialog
     v-model="visible"
     :title="title"
@@ -126,35 +126,35 @@ const handleClosed = () => {
 
   &.confirm-icon-warning {
     background-color: #fdf6ec;
-    color: #e6a23c;
+    color: #EA580C;
   }
 
   &.confirm-icon-success {
-    background-color: #f0f9eb;
-    color: #67c23a;
+    background-color: #F0FDF4;
+    color: #16A34A;
   }
 
   &.confirm-icon-danger {
     background-color: #fef0f0;
-    color: #f56c6c;
+    color: #DC2626;
   }
 
   &.confirm-icon-info {
     background-color: #f4f4f5;
-    color: #909399;
+    color: #64748B;
   }
 }
 
 .confirm-message {
   font-size: 16px;
   font-weight: 500;
-  color: #303133;
+  color: #1E293B;
   margin-bottom: 8px;
 }
 
 .confirm-description {
   font-size: 14px;
-  color: #909399;
+  color: #64748B;
   line-height: 1.5;
 }
 </style>

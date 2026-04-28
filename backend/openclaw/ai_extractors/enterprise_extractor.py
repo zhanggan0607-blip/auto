@@ -2,6 +2,7 @@
 AI 企业信息提取器
 使用 LLM 进行语义提取
 """
+import asyncio
 import logging
 import re
 import json
@@ -131,7 +132,6 @@ HTML内容：
         """
         调用 LLM
         """
-        import asyncio
         import inspect
 
         try:

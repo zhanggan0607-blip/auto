@@ -1,4 +1,4 @@
-<template>
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<template>
   <div class="company-page">
     <div class="page-header">
       <div class="header-title">
@@ -1546,6 +1546,7 @@ import {
 import { enterpriseApi } from '@/api/enterprise'
 import { regionData, getRegionValue, parseRegionValue } from '@/utils/regions'
 import { getContactTypeText, getMatchRuleTypeText } from '@/store/constants'
+import { parseListResponse } from '@/utils/response-parser'
 import ImageViewer from '@/components/ImageViewer.vue'
 
 const imageViewerRef = ref(null)
@@ -1830,7 +1831,8 @@ const handleRegionChange = (value) => {
 const fetchEnterpriseList = async () => {
   try {
     const res = await enterpriseApi.getEnterprises()
-    enterpriseList.value = res.data?.list || res.results || res.data || []
+    const { list } = parseListResponse(res)
+    enterpriseList.value = list
     if (enterpriseList.value.length > 0) {
       selectEnterprise(enterpriseList.value[0])
     }
@@ -1853,7 +1855,8 @@ const selectEnterprise = async (row) => {
 const fetchKeyPersonnel = async (enterpriseId) => {
   try {
     const res = await enterpriseApi.getKeyPersonnel({ enterprise: enterpriseId })
-    keyPersonnel.value = res.data?.list || res.results || res.data || []
+    const { list } = parseListResponse(res)
+    keyPersonnel.value = list
   } catch (error) {
     console.error('获取关键人员信息失败:', error)
     keyPersonnel.value = []
@@ -1863,7 +1866,8 @@ const fetchKeyPersonnel = async (enterpriseId) => {
 const fetchQualifications = async (enterpriseId) => {
   try {
     const res = await enterpriseApi.getQualifications({ enterprise: enterpriseId })
-    qualifications.value = res.data?.list || res.results || res.data || []
+    const { list } = parseListResponse(res)
+    qualifications.value = list
   } catch (error) {
     console.error('获取资质信息失败:', error)
     qualifications.value = []
@@ -1873,7 +1877,8 @@ const fetchQualifications = async (enterpriseId) => {
 const fetchPerformances = async (enterpriseId) => {
   try {
     const res = await enterpriseApi.getPerformances({ enterprise: enterpriseId })
-    performances.value = res.data?.list || res.results || res.data || []
+    const { list } = parseListResponse(res)
+    performances.value = list
   } catch (error) {
     console.error('获取业绩记录失败:', error)
     performances.value = []
@@ -1903,8 +1908,8 @@ const fetchDocuments = async () => {
     if (documentFilterStatus.value) params.status = documentFilterStatus.value
 
     const res = await enterpriseApi.getDocuments(params)
-    const rawData = res?.data?.list || res?.list || res?.data?.results || res?.data || []
-    documentList.value = Array.isArray(rawData) ? rawData : []
+    const { list } = parseListResponse(res)
+    documentList.value = list
   } catch (error) {
     console.error('获取文档列表失败:', error)
     documentList.value = []
@@ -2124,7 +2129,7 @@ const saveEnterprise = async () => {
   try {
     const submitData = { ...enterpriseForm }
     
-    const numericFields = ['registered_capital', 'staff_count', 'insured_count', 'auto_bid_threshold']
+    const numericFields = ['registered_capital', 'staff_count', 'insured_count']
     numericFields.forEach(field => {
       const value = submitData[field]
       if (value === '' || value === undefined || value === null || (typeof value === 'string' && value.trim() === '')) {
@@ -2136,6 +2141,15 @@ const saveEnterprise = async () => {
         submitData[field] = null
       }
     })
+
+    if (submitData.auto_bid_threshold === '' || submitData.auto_bid_threshold === undefined || submitData.auto_bid_threshold === null || (typeof submitData.auto_bid_threshold === 'string' && submitData.auto_bid_threshold.trim() === '')) {
+      submitData.auto_bid_threshold = 60
+    } else if (typeof submitData.auto_bid_threshold === 'string' && submitData.auto_bid_threshold !== '') {
+      const num = Number(submitData.auto_bid_threshold)
+      submitData.auto_bid_threshold = isNaN(num) ? 60 : num
+    } else if (typeof submitData.auto_bid_threshold === 'number' && isNaN(submitData.auto_bid_threshold)) {
+      submitData.auto_bid_threshold = 60
+    }
     
     const emptyStringFields = ['credit_code', 'legal_person',
       'province', 'city', 'district', 'address', 'contact_person', 'contact_phone',
@@ -2711,7 +2725,8 @@ const fetchContacts = async (enterpriseId) => {
   contactsLoading.value = true
   try {
     const res = await enterpriseApi.getContacts({ enterprise: enterpriseId })
-    contacts.value = res.data?.list || res.results || res.data || []
+    const { list } = parseListResponse(res)
+    contacts.value = list
   } catch (error) {
     console.error('获取联系人信息失败:', error)
     contacts.value = []
@@ -2832,7 +2847,8 @@ const fetchMatchRules = async (enterpriseId) => {
   matchRulesLoading.value = true
   try {
     const res = await enterpriseApi.getMatchRules({ enterprise: enterpriseId })
-    matchRules.value = res.data?.list || res.results || res.data || []
+    const { list } = parseListResponse(res)
+    matchRules.value = list
   } catch (error) {
     console.error('获取匹配规则失败:', error)
     matchRules.value = []
@@ -2923,7 +2939,7 @@ const saveMatchRule = async () => {
 <style scoped>
 .company-page {
   padding: 20px;
-  background-color: #f5f7fa;
+  background-color: #F1F5F9;
   min-height: calc(100vh - 60px);
 }
 
@@ -2933,7 +2949,7 @@ const saveMatchRule = async () => {
   align-items: flex-start;
   margin-bottom: 24px;
   padding: 20px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #1A56DB 0%, #1E40AF 100%);
   border-radius: 12px;
   color: white;
 }
@@ -2971,8 +2987,8 @@ const saveMatchRule = async () => {
 
 .list-card :deep(.el-card__header) {
   padding: 16px 20px;
-  background-color: #fafafa;
-  border-bottom: 1px solid #ebeef5;
+  background-color: #F8FAFC;
+  border-bottom: 1px solid #E2E8F0;
 }
 
 .section-header {
@@ -2987,17 +3003,17 @@ const saveMatchRule = async () => {
   gap: 8px;
   font-size: 16px;
   font-weight: 600;
-  color: #303133;
+  color: #1E293B;
 }
 
 .section-title .el-icon {
   font-size: 18px;
-  color: #409eff;
+  color: #3B82F6;
 }
 
 .enterprise-count {
   font-size: 13px;
-  color: #909399;
+  color: #64748B;
 }
 
 .enterprise-table {
@@ -3010,7 +3026,7 @@ const saveMatchRule = async () => {
 }
 
 .enterprise-table :deep(.el-table__row:hover) {
-  background-color: #ecf5ff !important;
+  background-color: #EFF6FF !important;
 }
 
 .enterprise-table :deep(.selected-row) {
@@ -3046,8 +3062,8 @@ const saveMatchRule = async () => {
 
 .detail-card :deep(.el-card__header) {
   padding: 16px 20px;
-  background-color: #fafafa;
-  border-bottom: 1px solid #ebeef5;
+  background-color: #F8FAFC;
+  border-bottom: 1px solid #E2E8F0;
 }
 
 .detail-actions {
@@ -3069,8 +3085,8 @@ const saveMatchRule = async () => {
 
 .info-descriptions :deep(.el-descriptions__label) {
   font-weight: 500;
-  color: #606266;
-  background-color: #fafafa;
+  color: #334155;
+  background-color: #F8FAFC;
   white-space: nowrap;
   width: 110px;
 }
@@ -3080,16 +3096,16 @@ const saveMatchRule = async () => {
 }
 
 .info-value.highlight {
-  color: #409eff;
+  color: #3B82F6;
   font-size: 15px;
 }
 
 .info-value.capital {
-  color: #67c23a;
+  color: #16A34A;
 }
 
 .info-value.phone {
-  color: #409eff;
+  color: #3B82F6;
 }
 
 .table-container {
@@ -3106,7 +3122,7 @@ const saveMatchRule = async () => {
 
 .empty-icon {
   font-size: 64px;
-  color: #c0c4cc;
+  color: #CBD5E1;
 }
 
 .personnel-section {
@@ -3121,7 +3137,7 @@ const saveMatchRule = async () => {
 
 .file-name {
   margin-left: 8px;
-  color: #409eff;
+  color: #3B82F6;
   font-size: 12px;
 }
 
@@ -3131,7 +3147,7 @@ const saveMatchRule = async () => {
   font-size: 13px;
   line-height: 1.6;
   padding: 8px 0;
-  color: #606266;
+  color: #334155;
 }
 
 .documents-section {
@@ -3150,21 +3166,21 @@ const saveMatchRule = async () => {
 }
 
 .primary-icon {
-  color: #E6A23C;
+  color: #EA580C;
   margin-right: 4px;
 }
 
 .expiry-expired {
-  color: #F56C6C;
+  color: #DC2626;
 }
 
 .expiry-expiring {
-  color: #E6A23C;
+  color: #EA580C;
 }
 
 .form-tip {
   margin-left: 10px;
-  color: #909399;
+  color: #64748B;
   font-size: 12px;
 }
 
@@ -3190,7 +3206,7 @@ const saveMatchRule = async () => {
 
 .preview-unsupported {
   text-align: center;
-  color: #909399;
+  color: #64748B;
 }
 
 .preview-unsupported .el-icon {
@@ -3225,7 +3241,7 @@ const saveMatchRule = async () => {
 
 .file-name {
   margin-left: 8px;
-  color: #409eff;
+  color: #3B82F6;
   font-size: 12px;
 }
 

@@ -50,7 +50,7 @@ class Command(BaseCommand):
                 'category': 'ai',
                 'description': '向量数据库服务',
                 'health_check_type': 'http',
-                'health_check_url': 'http://localhost:8000/api/v1/vectorlib/health/',
+                'health_check_url': 'http://localhost:8100/health/',
                 'is_critical': False,
             },
             {
@@ -77,7 +77,7 @@ class Command(BaseCommand):
                 'category': 'web',
                 'description': 'Vue前端开发服务器',
                 'health_check_type': 'http',
-                'health_check_url': 'http://localhost:8081',
+                'health_check_url': 'http://localhost:9081',
                 'is_critical': False,
             },
             {

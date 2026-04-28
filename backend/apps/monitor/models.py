@@ -68,8 +68,8 @@ class MonitoredService(models.Model):
         ],
         default='http'
     )
-    health_check_interval = models.IntegerField('检查间隔(秒)', default=30)
-    health_check_timeout = models.IntegerField('检查超时(秒)', default=10)
+    health_check_interval = models.IntegerField('检查间隔(秒)', default=60)
+    health_check_timeout = models.IntegerField('检查超时(秒)', default=3)
 
     consecutive_failures_to_restart = models.IntegerField(
         '连续失败次数触发重启',

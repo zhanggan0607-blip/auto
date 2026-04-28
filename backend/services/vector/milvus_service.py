@@ -216,7 +216,6 @@ class MilvusService:
             ]
 
             result = collection.insert(entities)
-            collection.flush()
 
             ids = [str(id) for id in result.primary_keys]
             logger.info(f"Milvus插入成功: {len(ids)} 条向量")
@@ -243,11 +242,23 @@ class MilvusService:
             collection_name = settings.CHROMA_CONFIG.get('COLLECTION_NAME', 'enterprise_embeddings')
             collection = self._get_or_create_collection(collection_name)
 
-            expr = f"id in [{','.join(ids)}]"
+            safe_ids = []
+            for id_val in ids:
+                try:
+                    safe_ids.append(str(int(id_val)))
+                except (ValueError, TypeError):
+                    logger.warning(f"跳过无效的向量ID: {id_val}")
+                    continue
+
+            if not safe_ids:
+                logger.warning("没有有效的向量ID可删除")
+                return False
+
+            expr = f"id in [{','.join(safe_ids)}]"
             collection.delete(expr)
             collection.flush()
 
-            logger.info(f"Milvus删除成功: {len(ids)} 条向量")
+            logger.info(f"Milvus删除成功: {len(safe_ids)} 条向量")
             return True
 
         except Exception as e:

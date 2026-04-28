@@ -214,7 +214,7 @@ class BidTaskScheduler:
                     else:
                         crawler = ShanghaiConstructionCrawler()
                     
-                    result = await crawler.crawl_tenders(
+                    result = await crawler.crawl(
                         keywords=schedule.keywords,
                         max_pages=schedule.max_pages or 5
                     )

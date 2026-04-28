@@ -12,8 +12,11 @@ if not ALLOWED_HOSTS or ALLOWED_HOSTS == ['']:
     raise ValueError('DJANGO_ALLOWED_HOSTS environment variable is required in production')
 
 # =============================================================================
-# 数据库配置 - 读写分离
+# 数据库配置
+# 仅在配置了DB_REPLICA_HOST时启用读写分离，否则使用单库
 # =============================================================================
+_db_replica_host = os.getenv('DB_REPLICA_HOST')
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
@@ -22,12 +25,12 @@ DATABASES = {
         'PASSWORD': os.getenv('DB_PASSWORD'),
         'HOST': os.getenv('DB_HOST', 'localhost'),
         'PORT': os.getenv('DB_PORT', '5432'),
-        'CONN_MAX_AGE': 600,
+        'CONN_MAX_AGE': 120,
         'CONN_HEALTH_CHECKS': True,
         'OPTIONS': {
             'connect_timeout': 10,
             'options': '-c statement_timeout=30000',
-            'sslmode': os.getenv('DB_SSL_MODE', 'require'),
+            'sslmode': os.getenv('DB_SSL_MODE', 'prefer'),
             'sslcert': os.getenv('DB_SSL_CERT', ''),
             'sslkey': os.getenv('DB_SSL_KEY', ''),
             'sslrootcert': os.getenv('DB_SSL_ROOTCERT', ''),
@@ -36,19 +39,22 @@ DATABASES = {
             'MIRROR': None,
         },
     },
-    'replica': {
+}
+
+if _db_replica_host:
+    DATABASES['replica'] = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.getenv('DB_NAME'),
         'USER': os.getenv('DB_REPLICA_USER', os.getenv('DB_USER')),
         'PASSWORD': os.getenv('DB_REPLICA_PASSWORD', os.getenv('DB_PASSWORD')),
-        'HOST': os.getenv('DB_REPLICA_HOST', os.getenv('DB_HOST', 'localhost')),
+        'HOST': _db_replica_host,
         'PORT': os.getenv('DB_REPLICA_PORT', os.getenv('DB_PORT', '5432')),
-        'CONN_MAX_AGE': 600,
+        'CONN_MAX_AGE': 120,
         'CONN_HEALTH_CHECKS': True,
         'OPTIONS': {
             'connect_timeout': 10,
-            'options': '-c statement_timeout=60000',
-            'sslmode': os.getenv('DB_SSL_MODE', 'require'),
+            'options': '-c statement_timeout=30000',
+            'sslmode': os.getenv('DB_SSL_MODE', 'prefer'),
             'sslcert': os.getenv('DB_SSL_CERT', ''),
             'sslkey': os.getenv('DB_SSL_KEY', ''),
             'sslrootcert': os.getenv('DB_SSL_ROOTCERT', ''),
@@ -56,16 +62,23 @@ DATABASES = {
         'TEST': {
             'MIRROR': 'default',
         },
-    },
-}
-
-DATABASE_ROUTERS = ['core.db_router.ReadWriteRouter']
+    }
+    DATABASE_ROUTERS = ['core.db_router.ReadWriteRouter']
 
 
 # =============================================================================
-# Redis集群配置
+# Redis配置
+# 默认使用单节点Redis（redis-celery），适合大多数场景
+# 如需高可用，启用REDIS_CLUSTER_ENABLED并配置REDIS_CLUSTER_NODES
 # =============================================================================
 REDIS_CLUSTER_ENABLED = os.getenv('REDIS_CLUSTER_ENABLED', 'false').lower() == 'true'
+
+REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
+REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
+REDIS_CACHE_DB = int(os.getenv('REDIS_CACHE_DB', 1))
+REDIS_PASSWORD = os.getenv('REDIS_PASSWORD', '')
+
+_redis_auth = f":{REDIS_PASSWORD}@" if REDIS_PASSWORD else ""
 
 if REDIS_CLUSTER_ENABLED:
     REDIS_CLUSTER_NODES = os.getenv('REDIS_CLUSTER_NODES', '').split(',')
@@ -81,6 +94,7 @@ if REDIS_CLUSTER_ENABLED:
                     'socket_keepalive': True,
                     'socket_connect_timeout': 5,
                     'socket_timeout': 5,
+                    **({'password': REDIS_PASSWORD} if REDIS_PASSWORD else {}),
                 },
                 'CLIENT_CLASS': 'django_redis.client.DefaultClient',
             },
@@ -94,6 +108,7 @@ if REDIS_CLUSTER_ENABLED:
                 'CONNECTION_POOL_KWARGS': {
                     'max_connections': 100,
                     'retry_on_timeout': True,
+                    **({'password': REDIS_PASSWORD} if REDIS_PASSWORD else {}),
                 },
             },
             'KEY_PREFIX': 'bid_auto_session',
@@ -104,7 +119,7 @@ else:
     CACHES = {
         'default': {
             'BACKEND': 'django_redis.cache.RedisCache',
-            'LOCATION': f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/{os.getenv('REDIS_CACHE_DB', '1')}",
+            'LOCATION': f"redis://{_redis_auth}{REDIS_HOST}:{REDIS_PORT}/{REDIS_CACHE_DB}",
             'OPTIONS': {
                 'CONNECTION_POOL_KWARGS': {
                     'max_connections': 200,
@@ -112,6 +127,7 @@ else:
                     'socket_keepalive': True,
                     'socket_connect_timeout': 5,
                     'socket_timeout': 5,
+                    **({'password': REDIS_PASSWORD} if REDIS_PASSWORD else {}),
                 }
             },
             'KEY_PREFIX': 'bid_auto',
@@ -119,11 +135,12 @@ else:
         },
         'session': {
             'BACKEND': 'django_redis.cache.RedisCache',
-            'LOCATION': f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/2",
+            'LOCATION': f"redis://{_redis_auth}{REDIS_HOST}:{REDIS_PORT}/2",
             'OPTIONS': {
                 'CONNECTION_POOL_KWARGS': {
                     'max_connections': 100,
                     'retry_on_timeout': True,
+                    **({'password': REDIS_PASSWORD} if REDIS_PASSWORD else {}),
                 }
             },
             'KEY_PREFIX': 'bid_auto_session',
@@ -148,8 +165,14 @@ if os.getenv('RABBITMQ_HOST'):
     CELERY_BROKER_URL = f"amqp://{os.getenv('RABBITMQ_USER', 'guest')}:{os.getenv('RABBITMQ_PASSWORD', 'guest')}@{os.getenv('RABBITMQ_HOST', 'localhost')}:5672//"
     CELERY_RESULT_BACKEND = f"rpc://{os.getenv('RABBITMQ_USER', 'guest')}:{os.getenv('RABBITMQ_PASSWORD', 'guest')}@{os.getenv('RABBITMQ_HOST', 'localhost')}:5672//"
 else:
-    CELERY_BROKER_URL = f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/3"
-    CELERY_RESULT_BACKEND = CELERY_BROKER_URL
+    CELERY_BROKER_URL = os.getenv(
+        'CELERY_BROKER_URL',
+        f"redis://{_redis_auth}{REDIS_HOST}:{REDIS_PORT}/3"
+    )
+    CELERY_RESULT_BACKEND = os.getenv(
+        'CELERY_RESULT_BACKEND',
+        CELERY_BROKER_URL
+    )
 
 CELERY_TASK_DEFAULT_QUEUE = 'default'
 CELERY_TASK_QUEUES = {
@@ -168,6 +191,10 @@ CELERY_TASK_QUEUES = {
     'notification': {
         'exchange': 'notification',
         'routing_key': 'notification',
+    },
+    'vector': {
+        'exchange': 'vector',
+        'routing_key': 'vector',
     },
 }
 
@@ -206,6 +233,7 @@ CORS_ALLOWED_ORIGINS = [
 CORS_ALLOW_CREDENTIALS = True
 
 SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', 'true').lower() == 'true'
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 SECURE_HSTS_SECONDS = 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
@@ -254,8 +282,6 @@ REST_FRAMEWORK['DEFAULT_RENDERER_CLASSES'] = [
     'rest_framework.renderers.JSONRenderer',
 ]
 
-REST_FRAMEWORK['EXCEPTION_HANDLER'] = 'core.exceptions.custom_exception_handler'
-
 
 # =============================================================================
 # 日志配置
@@ -266,7 +292,8 @@ LOGGING = {
     'disable_existing_loggers': False,
     'formatters': {
         'verbose': {
-            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            '()': 'core.logging_config.SafeVerboseFormatter',
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} [{trace_id}] {message}',
             'style': '{',
         },
         'json': {
@@ -281,10 +308,17 @@ LOGGING = {
             'format': '{levelname} {asctime} {name} {message}',
             'style': '{',
         },
+        'celery': {
+            'format': '{levelname} {asctime} [celery.{name}] {message}',
+            'style': '{',
+        },
     },
     'filters': {
         'sensitive_data_filter': {
-            '()': 'django.utils.log.ServerFormatter',
+            '()': 'core.logging_config.SensitiveFilter',
+        },
+        'trace_id_filter': {
+            '()': 'core.logging_config.TraceIdFilter',
         },
     },
     'handlers': {
@@ -316,10 +350,41 @@ LOGGING = {
             'backupCount': 30,
             'formatter': 'security',
             'encoding': 'utf8',
+            'filters': ['sensitive_data_filter'],
+        },
+        'error_file': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': '/var/log/bid_auto/error.log',
+            'maxBytes': 50 * 1024 * 1024,
+            'backupCount': 10,
+            'formatter': 'verbose',
+            'encoding': 'utf8',
+            'filters': ['sensitive_data_filter', 'trace_id_filter'],
+            'level': 'ERROR',
+        },
+        'celery_file': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': '/var/log/bid_auto/celery.log',
+            'maxBytes': 50 * 1024 * 1024,
+            'backupCount': 15,
+            'formatter': 'celery',
+            'encoding': 'utf8',
+            'filters': ['sensitive_data_filter'],
+            'level': 'INFO',
+        },
+        'celery_error_file': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': '/var/log/bid_auto/celery_error.log',
+            'maxBytes': 50 * 1024 * 1024,
+            'backupCount': 10,
+            'formatter': 'celery',
+            'encoding': 'utf8',
+            'filters': ['sensitive_data_filter'],
+            'level': 'ERROR',
         },
     },
     'root': {
-        'handlers': ['console', 'file'],
+        'handlers': ['console', 'file', 'error_file'],
         'level': 'INFO',
     },
     'loggers': {
@@ -329,8 +394,13 @@ LOGGING = {
             'propagate': False,
         },
         'django.request': {
-            'handlers': ['json_file'],
+            'handlers': ['json_file', 'error_file'],
             'level': 'WARNING',
+            'propagate': False,
+        },
+        'apps': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
             'propagate': False,
         },
         'crawler': {
@@ -340,6 +410,11 @@ LOGGING = {
         },
         'workflow': {
             'handlers': ['console', 'file', 'json_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'celery': {
+            'handlers': ['celery_file', 'celery_error_file', 'console'],
             'level': 'INFO',
             'propagate': False,
         },

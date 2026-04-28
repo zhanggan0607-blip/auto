@@ -120,7 +120,7 @@
               <div class="step-time-info" v-if="step.started_at || step.elapsed_seconds">
                 <span class="time-item" v-if="step.started_at">
                   <el-icon><Clock /></el-icon>
-                  开始: {{ formatTime(step.started_at) }}
+                  开始: {{ formatDateTime(step.started_at) }}
                 </span>
                 <span class="time-item" v-if="step.elapsed_seconds !== null && step.elapsed_seconds !== undefined">
                   <el-icon><Timer /></el-icon>
@@ -169,16 +169,6 @@
             取消任务
           </el-button>
           <el-button
-            v-if="task.status === 'failed'"
-            type="primary"
-            size="small"
-            @click="handleRetry"
-            :loading="retrying"
-          >
-            <el-icon><RefreshRight /></el-icon>
-            重试
-          </el-button>
-          <el-button
             v-if="task.status === 'completed'"
             type="success"
             size="small"
@@ -209,6 +199,8 @@ import {
   WarningFilled,
   Timer
 } from '@element-plus/icons-vue'
+import request from '@/utils/request'
+import { formatDateTime } from '@/utils/date'
 
 const props = defineProps({
   taskId: {
@@ -229,11 +221,10 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['close', 'cancel', 'retry', 'update:visible'])
+const emit = defineEmits(['close', 'cancel', 'update:visible'])
 
 const task = ref(null)
 const cancelling = ref(false)
-const retrying = ref(false)
 const pollingTimer = ref(null)
 const startTime = ref(null)
 
@@ -373,12 +364,6 @@ const estimatedRemaining = computed(() => {
   return formatDuration(Math.floor(remaining))
 })
 
-const formatTime = (isoString) => {
-  if (!isoString) return ''
-  const date = new Date(isoString)
-  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-}
-
 const formatDuration = (seconds) => {
   if (seconds === null || seconds === undefined) return ''
   seconds = Math.floor(seconds)
@@ -405,26 +390,36 @@ const getStepDefaultMessage = (status) => {
 
 const fetchTaskStatus = async () => {
   try {
-    const response = await fetch(`/api/v1/progress/tasks/${props.taskId}/`)
-    if (response.ok) {
-      const data = await response.json()
-      if (data.success && data.data) {
-        task.value = data.data
-        if (data.data.started_at && !startTime.value) {
-          startTime.value = new Date(data.data.started_at)
-        }
-      } else if (data.status) {
-        task.value = data
+    const data = await request.get(`/v1/progress/tasks/${props.taskId}/`)
+    if (data.code === 0 && data.data) {
+      const inner = data.data
+      if (inner.success && inner.data) {
+        task.value = inner.data
+      } else if (inner.task_id || inner.status) {
+        task.value = inner
+      } else {
+        task.value = inner
       }
+      if (task.value?.started_at && !startTime.value) {
+        startTime.value = new Date(task.value.started_at)
+      }
+    } else if (data.success && data.data) {
+      task.value = data.data
+      if (data.data.started_at && !startTime.value) {
+        startTime.value = new Date(data.data.started_at)
+      }
+    } else if (data.status) {
+      task.value = data
+    }
 
-      if (task.value?.status === 'completed' || task.value?.status === 'failed') {
-        stopPolling()
-      }
-    } else if (response.status === 404) {
-      task.value = { status: 'not_found', error: '任务不存在或已过期' }
+    if (task.value?.status === 'completed' || task.value?.status === 'failed') {
       stopPolling()
     }
   } catch (error) {
+    if (error.response?.status === 404) {
+      task.value = { status: 'not_found', error: '任务不存在或已过期' }
+      stopPolling()
+    }
     console.error('获取任务状态失败:', error)
   }
 }
@@ -458,37 +453,13 @@ const handleErrorClose = () => {
 const handleCancel = async () => {
   cancelling.value = true
   try {
-    const response = await fetch(`/api/v1/progress/tasks/${props.taskId}/cancel/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    })
-    if (response.ok) {
-      emit('cancel', props.taskId)
-      handleClose()
-    }
+    await request.post(`/v1/progress/tasks/${props.taskId}/cancel/`)
+    emit('cancel', props.taskId)
+    handleClose()
   } catch (error) {
     console.error('取消任务失败:', error)
   } finally {
     cancelling.value = false
-  }
-}
-
-const handleRetry = async () => {
-  retrying.value = true
-  try {
-    const response = await fetch(`/api/v1/progress/tasks/${props.taskId}/retry/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    })
-    if (response.ok) {
-      task.value = { status: 'running', progress: 0 }
-      emit('retry', props.taskId)
-      startPolling()
-    }
-  } catch (error) {
-    console.error('重试任务失败:', error)
-  } finally {
-    retrying.value = false
   }
 }
 
@@ -545,7 +516,7 @@ onUnmounted(() => {
 
   :deep(.el-card__header) {
     padding: 12px 16px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #1A56DB 0%, #1E40AF 100%);
     color: white;
     border-bottom: none;
   }
@@ -570,9 +541,9 @@ onUnmounted(() => {
 .task-icon {
   font-size: 18px;
 
-  &.status-completed { color: #67c23a; }
-  &.status-failed { color: #f56c6c; }
-  &.status-running { color: #409eff; animation: rotate 1s linear infinite; }
+  &.status-completed { color: #16A34A; }
+  &.status-failed { color: #DC2626; }
+  &.status-running { color: #3B82F6; animation: rotate 1s linear infinite; }
 }
 
 @keyframes rotate {
@@ -625,13 +596,13 @@ onUnmounted(() => {
 .progress-percentage {
   font-size: 28px;
   font-weight: 700;
-  color: #303133;
+  color: #1E293B;
   line-height: 1;
 }
 
 .progress-message {
   font-size: 13px;
-  color: #606266;
+  color: #334155;
   max-width: 250px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -644,7 +615,7 @@ onUnmounted(() => {
   align-items: flex-end;
   gap: 4px;
   font-size: 12px;
-  color: #909399;
+  color: #64748B;
 
   .time-item {
     display: flex;
@@ -656,12 +627,12 @@ onUnmounted(() => {
 .steps-title {
   font-size: 13px;
   font-weight: 600;
-  color: #606266;
+  color: #334155;
 }
 
 .steps-count {
   font-size: 12px;
-  color: #909399;
+  color: #64748B;
   margin-left: 4px;
 }
 
@@ -692,27 +663,27 @@ onUnmounted(() => {
   font-size: 12px;
   font-weight: 600;
   background: #e4e7ed;
-  color: #909399;
+  color: #64748B;
   flex-shrink: 0;
 }
 
 .step-waiting .step-circle {
   background: #e4e7ed;
-  color: #909399;
+  color: #64748B;
 }
 
 .step-active .step-circle {
-  background: #409eff;
+  background: #3B82F6;
   color: white;
 }
 
 .step-completed .step-circle {
-  background: #67c23a;
+  background: #16A34A;
   color: white;
 }
 
 .step-error .step-circle {
-  background: #f56c6c;
+  background: #DC2626;
   color: white;
 }
 
@@ -734,7 +705,7 @@ onUnmounted(() => {
 }
 
 .step-completed .step-line {
-  background: #67c23a;
+  background: #16A34A;
 }
 
 .step-content {
@@ -752,23 +723,23 @@ onUnmounted(() => {
 .step-title {
   font-size: 14px;
   font-weight: 500;
-  color: #303133;
+  color: #1E293B;
 }
 
 .step-waiting .step-title {
-  color: #909399;
+  color: #64748B;
 }
 
 .step-active .step-title {
-  color: #409eff;
+  color: #3B82F6;
 }
 
 .step-completed .step-title {
-  color: #67c23a;
+  color: #16A34A;
 }
 
 .step-error .step-title {
-  color: #f56c6c;
+  color: #DC2626;
 }
 
 .step-badges {
@@ -782,13 +753,13 @@ onUnmounted(() => {
 
 .step-description {
   font-size: 12px;
-  color: #909399;
+  color: #64748B;
   line-height: 1.4;
   margin-bottom: 4px;
 }
 
 .step-active .step-description {
-  color: #606266;
+  color: #334155;
 }
 
 .step-progress-bar {
@@ -801,7 +772,7 @@ onUnmounted(() => {
   gap: 12px;
   margin-top: 6px;
   font-size: 11px;
-  color: #909399;
+  color: #64748B;
 
   .time-item {
     display: flex;
@@ -809,7 +780,7 @@ onUnmounted(() => {
     gap: 3px;
 
     &.error {
-      color: #f56c6c;
+      color: #DC2626;
       font-weight: 500;
     }
   }
@@ -834,7 +805,7 @@ onUnmounted(() => {
     align-items: center;
     gap: 6px;
     margin-top: 8px;
-    color: #e6a23c;
+    color: #EA580C;
   }
 }
 
@@ -844,6 +815,6 @@ onUnmounted(() => {
   gap: 8px;
   margin-top: 16px;
   padding-top: 12px;
-  border-top: 1px solid #ebeef5;
+  border-top: 1px solid #E2E8F0;
 }
 </style>

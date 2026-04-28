@@ -83,7 +83,7 @@
           </el-table-column>
           <el-table-column prop="last_run_at" label="上次执行" width="160">
             <template #default="{ row }">
-              {{ row.last_run_at ? formatTime(row.last_run_at) : '-' }}
+              {{ row.last_run_at ? formatDateTime(row.last_run_at) : '-' }}
             </template>
           </el-table-column>
           <el-table-column prop="run_count" label="执行次数" width="90" />
@@ -135,7 +135,7 @@
           </el-table-column>
           <el-table-column prop="last_run" label="上次执行" width="160">
             <template #default="{ row }">
-              {{ formatTime(row.last_run) || '从未执行' }}
+              {{ formatDateTime(row.last_run) || '从未执行' }}
             </template>
           </el-table-column>
           <el-table-column prop="run_count" label="执行次数" width="100" />
@@ -182,7 +182,7 @@
               {{ healthStatus.vector_count || 0 }}
             </el-descriptions-item>
             <el-descriptions-item label="检查时间" :span="2">
-              {{ formatTime(healthStatus.timestamp) }}
+              {{ formatDateTime(healthStatus.timestamp) }}
             </el-descriptions-item>
           </el-descriptions>
         </el-card>
@@ -226,14 +226,14 @@
       <el-descriptions :column="2" border v-if="currentWorkflow">
         <el-descriptions-item label="工作流ID">{{ currentWorkflow.workflow_id }}</el-descriptions-item>
         <el-descriptions-item label="状态">
-          <el-tag :type="getStatusType(currentWorkflow.status)">{{ getStatusText(currentWorkflow.status) }}</el-tag>
+          <el-tag :type="getStatusType('workflow_status', 'workflow_status', currentWorkflow.status)">{{ getStatusText(currentWorkflow.status) }}</el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="当前阶段">{{ getTaskName(currentWorkflow.current_task) }}</el-descriptions-item>
         <el-descriptions-item label="模拟得分">
           <span :class="getScoreClass(currentWorkflow.bid_score)">{{ currentWorkflow.bid_score || '-' }}分</span>
         </el-descriptions-item>
         <el-descriptions-item label="优化次数">{{ currentWorkflow.iteration_count || 0 }}</el-descriptions-item>
-        <el-descriptions-item label="创建时间">{{ formatTime(currentWorkflow.created_at) }}</el-descriptions-item>
+        <el-descriptions-item label="创建时间">{{ formatDateTime(currentWorkflow.created_at) }}</el-descriptions-item>
       </el-descriptions>
       
       <el-divider>执行日志</el-divider>
@@ -241,7 +241,7 @@
         <el-timeline-item
           v-for="(log, index) in currentWorkflow.logs"
           :key="index"
-          :timestamp="formatTime(log.timestamp)"
+          :timestamp="formatDateTime(log.timestamp)"
           placement="top"
         >
           {{ log.message }}
@@ -398,6 +398,9 @@ import request from '@/utils/request'
 import { crawlerApi } from '@/api/crawler'
 import { enterpriseApi } from '@/api/enterprise'
 import { regionData } from '@/utils/regions'
+import { isSuccess, parseListResponse, parsePagination } from '@/utils/response-parser'
+import { formatDateTime } from '@/utils/date'
+import { getStatusType } from '@/store/constants'
 
 const router = useRouter()
 
@@ -496,18 +499,6 @@ const taskNames = {
   'task_9_notify_result': '结果通知'
 }
 
-const getStatusType = (status) => {
-  const types = {
-    'pending': 'info',
-    'running': 'primary',
-    'completed': 'success',
-    'failed': 'danger',
-    'waiting_review': 'warning',
-    'cancelled': 'info'
-  }
-  return types[status] || 'info'
-}
-
 const getStatusText = (status) => {
   const texts = {
     'pending': '待执行',
@@ -531,19 +522,6 @@ const getScoreClass = (score) => {
   return 'score-low'
 }
 
-const formatTime = (time) => {
-  if (!time) return '-'
-  const date = new Date(time)
-  return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  })
-}
-
 const parseCrontab = (crontab) => {
   const parts = crontab.split(' ')
   if (parts.length !== 5) return crontab
@@ -565,8 +543,8 @@ const parseCrontab = (crontab) => {
 const fetchStatistics = async () => {
   try {
     const res = await request.get('/v1/openclaw/automation/statistics/')
-    if (res.data?.success) {
-      statistics.value = res.data.data || {}
+    if (isSuccess(res)) {
+      statistics.value = res.data || {}
     }
   } catch (error) {
     console.error('获取统计失败:', error)
@@ -577,9 +555,8 @@ const fetchWorkflows = async () => {
   loading.value = true
   try {
     const res = await request.get('/v1/openclaw/automation/list_active/')
-    if (res.data?.success) {
-      workflowList.value = res.data.data?.list || []
-    }
+    const { list } = parseListResponse(res)
+    workflowList.value = list
   } catch (error) {
     console.error('获取工作流列表失败:', error)
   } finally {
@@ -591,8 +568,8 @@ const fetchSchedulerStatus = async () => {
   schedulerLoading.value = true
   try {
     const res = await request.get('/v1/openclaw/scheduler/status/')
-    if (res.data?.success) {
-      const tasks = res.data.data?.tasks || {}
+    if (isSuccess(res)) {
+      const tasks = res.data?.tasks || {}
       schedulerTasks.value = Object.entries(tasks).map(([id, task]) => ({
         task_id: id,
         ...task
@@ -608,8 +585,8 @@ const fetchSchedulerStatus = async () => {
 const fetchHealthStatus = async () => {
   try {
     const res = await request.get('/v1/openclaw/scheduler/health/')
-    if (res.data?.success) {
-      healthStatus.value = res.data.data || {}
+    if (isSuccess(res)) {
+      healthStatus.value = res.data || {}
     }
   } catch (error) {
     console.error('获取健康状态失败:', error)
@@ -623,16 +600,10 @@ const fetchSchedules = async () => {
       page: schedulesPagination.page,
       page_size: schedulesPagination.pageSize
     })
-    if (res.data && res.data.list) {
-      schedules.value = res.data.list
-      schedulesPagination.total = res.data.pagination?.total || 0
-    } else if (res.data && res.data.results) {
-      schedules.value = res.data.results
-      schedulesPagination.total = res.data.count || 0
-    } else if (Array.isArray(res.data)) {
-      schedules.value = res.data
-      schedulesPagination.total = res.data.length
-    }
+    const { list, total } = parseListResponse(res)
+    const pagination = parsePagination(res)
+    schedules.value = list
+    schedulesPagination.total = pagination.total || total || 0
   } catch (error) {
     console.error('获取采集计划失败:', error)
   } finally {
@@ -643,13 +614,8 @@ const fetchSchedules = async () => {
 const fetchTemplates = async () => {
   try {
     const res = await crawlerApi.getWebsiteTemplates({ page_size: 100 })
-    if (res.data && res.data.list) {
-      templates.value = res.data.list
-    } else if (res.data && res.data.results) {
-      templates.value = res.data.results
-    } else if (Array.isArray(res.data)) {
-      templates.value = res.data
-    }
+    const { list } = parseListResponse(res)
+    templates.value = list
   } catch (error) {
     console.error('获取网站模板失败:', error)
   }
@@ -659,7 +625,8 @@ const loadEnterprises = async () => {
   enterpriseLoading.value = true
   try {
     const res = await enterpriseApi.getEnterprises({ page_size: 100 })
-    enterpriseList.value = res?.data?.results || res?.results || res?.data?.list || res?.list || res?.data || []
+    const { list } = parseListResponse(res)
+    enterpriseList.value = list
   } catch (error) {
     console.error('获取企业列表失败:', error)
     enterpriseList.value = []
@@ -671,9 +638,8 @@ const loadEnterprises = async () => {
 const fetchTenders = async () => {
   try {
     const res = await request.get('/v1/tenders/', { params: { status: 'pending' } })
-    if (res.data?.success) {
-      tenderList.value = res.data.data?.list || res.data.data?.results || []
-    }
+    const { list } = parseListResponse(res)
+    tenderList.value = list
   } catch (error) {
     console.error('获取招标列表失败:', error)
   }
@@ -682,9 +648,8 @@ const fetchTenders = async () => {
 const fetchEnterprises = async () => {
   try {
     const res = await request.get('/v1/enterprise/enterprises/')
-    if (res.data?.success) {
-      enterpriseList.value = res.data.data?.list || res.data.data?.results || []
-    }
+    const { list } = parseListResponse(res)
+    enterpriseList.value = list
   } catch (error) {
     console.error('获取企业列表失败:', error)
   }
@@ -725,12 +690,12 @@ const submitWorkflow = async () => {
         }
       })
       
-      if (res.data?.success) {
+      if (isSuccess(res)) {
         ElMessage.success('投标任务已启动')
         workflowDialogVisible.value = false
         refreshData()
       } else {
-        ElMessage.error(res.data?.message || '启动失败')
+        ElMessage.error(res.message || '启动失败')
       }
     } catch (error) {
       ElMessage.error('启动失败')
@@ -754,7 +719,7 @@ const toggleTask = async (row) => {
 const runTaskNow = async (row) => {
   try {
     const res = await request.post(`/v1/openclaw/scheduler/run_now/`, { task_id: row.task_id })
-    if (res.data?.success) {
+    if (isSuccess(res)) {
       ElMessage.success('任务已执行')
       fetchSchedulerStatus()
     }
@@ -978,12 +943,12 @@ onUnmounted(() => {
 .stat-value {
   font-size: 28px;
   font-weight: bold;
-  color: #303133;
+  color: #1E293B;
 }
 
 .stat-label {
   font-size: 14px;
-  color: #909399;
+  color: #64748B;
   margin-top: 8px;
 }
 
@@ -1004,7 +969,7 @@ onUnmounted(() => {
 
 .form-tip {
   margin-left: 10px;
-  color: #909399;
+  color: #64748B;
   font-size: 12px;
 }
 

@@ -32,17 +32,17 @@ defineProps({
       gap: 4px;
       
       a {
-        color: #606266;
+        color: #334155;
         text-decoration: none;
         
         &:hover {
-          color: #409EFF;
+          color: #3B82F6;
         }
       }
     }
     
     &:last-child .el-breadcrumb__inner {
-      color: #303133;
+      color: #1E293B;
       font-weight: 500;
     }
   }

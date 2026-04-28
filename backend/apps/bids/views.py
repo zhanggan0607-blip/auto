@@ -15,7 +15,8 @@ from .serializers import (
     BidResultSerializer, BidResultCreateSerializer,
     BidStatisticsSerializer
 )
-from utils.responses import APIResponse
+from utils.responses import UnifiedResponse
+from core.pagination import StandardPagination
 
 
 class BidRecordListView(generics.ListCreateAPIView):
@@ -23,6 +24,8 @@ class BidRecordListView(generics.ListCreateAPIView):
     投标记录列表视图
     """
     permission_classes = [IsAuthenticated]
+    serializer_class = BidRecordListSerializer
+    pagination_class = StandardPagination
 
     def get_serializer_class(self):
         if self.request.method == 'POST':
@@ -31,52 +34,34 @@ class BidRecordListView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         queryset = BidRecord.objects.select_related('tender', 'bid_manager', 'created_by')
-        
+
         status_filter = self.request.query_params.get('status')
         if status_filter:
             queryset = queryset.filter(status=status_filter)
-        
+
         tender_id = self.request.query_params.get('tender_id')
         if tender_id:
             queryset = queryset.filter(tender_id=tender_id)
-        
+
         bid_manager_id = self.request.query_params.get('bid_manager_id')
         if bid_manager_id:
             queryset = queryset.filter(bid_manager_id=bid_manager_id)
-        
+
         start_date = self.request.query_params.get('start_date')
         end_date = self.request.query_params.get('end_date')
         if start_date:
             queryset = queryset.filter(bid_date__gte=start_date)
         if end_date:
             queryset = queryset.filter(bid_date__lte=end_date)
-        
+
         return queryset.order_by('-created_at')
 
-    def list(self, request, *args, **kwargs):
-        """
-        重写list方法，使用自定义响应格式
-        """
-        queryset = self.filter_queryset(self.get_queryset())
-        
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            total_count = page.paginator.count if hasattr(page, 'paginator') else len(queryset)
-            return APIResponse.success(data={
-                'list': serializer.data,
-                'pagination': {
-                    'total': total_count,
-                    'page': int(request.query_params.get('page', 1)),
-                    'page_size': int(request.query_params.get('page_size', 20))
-                }
-            })
-        
-        serializer = self.get_serializer(queryset, many=True)
-        return APIResponse.success(data={'list': serializer.data})
-
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        tender = serializer.validated_data.get('tender')
+        if tender and BidRecord.objects.filter(tender=tender).exists():
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({'tender': '该招标项目已存在投标记录'})
+        bid = serializer.save(created_by=self.request.user)
 
 
 class BidRecordDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -94,7 +79,7 @@ class BidRecordDetailView(generics.RetrieveUpdateDestroyAPIView):
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
-        return APIResponse.success(data=serializer.data)
+        return UnifiedResponse.success(data=serializer.data)
 
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
@@ -102,7 +87,7 @@ class BidRecordDetailView(generics.RetrieveUpdateDestroyAPIView):
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return APIResponse.success(data=serializer.data, message='更新成功')
+        return UnifiedResponse.success(data=serializer.data, message='更新成功')
 
     def destroy(self, request, *args, **kwargs):
         """
@@ -112,13 +97,13 @@ class BidRecordDetailView(generics.RetrieveUpdateDestroyAPIView):
         instance = self.get_object()
         
         if not (request.user.is_staff or instance.created_by == request.user):
-            return APIResponse.error(
+            return UnifiedResponse.error(
                 message='无权限删除此记录',
                 status_code=status.HTTP_403_FORBIDDEN
             )
         
         instance.delete()
-        return APIResponse.success(message='删除成功')
+        return UnifiedResponse.success(message='删除成功')
 
 
 class BidResultListView(generics.ListCreateAPIView):
@@ -126,6 +111,8 @@ class BidResultListView(generics.ListCreateAPIView):
     中标结果列表视图
     """
     permission_classes = [IsAuthenticated]
+    serializer_class = BidResultSerializer
+    pagination_class = StandardPagination
 
     def get_serializer_class(self):
         if self.request.method == 'POST':
@@ -134,20 +121,12 @@ class BidResultListView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         queryset = BidResult.objects.select_related('bid_record__tender')
-        
+
         result_type = self.request.query_params.get('result_type')
         if result_type:
             queryset = queryset.filter(result_type=result_type)
-        
-        return queryset.order_by('-created_at')
 
-    def list(self, request, *args, **kwargs):
-        """
-        重写list方法，使用自定义响应格式
-        """
-        queryset = self.filter_queryset(self.get_queryset())
-        serializer = self.get_serializer(queryset, many=True)
-        return APIResponse.success(data={'list': serializer.data})
+        return queryset.order_by('-created_at')
 
 
 class BidResultDetailView(generics.RetrieveUpdateAPIView):
@@ -161,7 +140,7 @@ class BidResultDetailView(generics.RetrieveUpdateAPIView):
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
-        return APIResponse.success(data=serializer.data)
+        return UnifiedResponse.success(data=serializer.data)
 
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
@@ -169,7 +148,7 @@ class BidResultDetailView(generics.RetrieveUpdateAPIView):
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return APIResponse.success(data=serializer.data, message='更新成功')
+        return UnifiedResponse.success(data=serializer.data, message='更新成功')
 
 
 class BidStatisticsView(APIView):
@@ -193,29 +172,20 @@ class BidStatisticsView(APIView):
         
         self.update_statistics(user, year)
         
-        return APIResponse.success(data=BidStatisticsSerializer(stats).data)
+        return UnifiedResponse.success(data=BidStatisticsSerializer(stats).data)
 
     def update_statistics(self, user, year):
-        """
-        更新统计数据
-        """
-        from apps.tenders.models import TenderProject
+        from services.data import BidRepository
+        repo = BidRepository()
+        stats_data = repo.get_statistics(user.id)
         
-        bid_records = BidRecord.objects.filter(
-            created_by=user,
-            created_at__year=year
-        )
+        total_bids = stats_data['total']
+        won_bids = stats_data['won']
+        lost_bids = stats_data['lost']
+        pending_bids = stats_data['pending']
+        total_bid_amount = stats_data['total_amount']
         
-        total_bids = bid_records.count()
-        won_bids = bid_records.filter(status='won').count()
-        lost_bids = bid_records.filter(status='lost').count()
-        pending_bids = bid_records.filter(status__in=['preparing', 'submitted', 'reviewing']).count()
-        
-        total_bid_amount = bid_records.aggregate(
-            total=Sum('bid_price')
-        )['total'] or 0
-        
-        won_records = bid_records.filter(status='won')
+        won_records = BidRecord.objects.filter(created_by=user, status='won', created_at__year=year)
         total_win_amount = won_records.aggregate(
             total=Sum('bid_price')
         )['total'] or 0
@@ -236,46 +206,3 @@ class BidStatisticsView(APIView):
         
         stats.calculate_win_rate()
         stats.save()
-
-
-class BidDashboardView(APIView):
-    """
-    投标仪表盘视图
-    """
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        """
-        获取仪表盘数据
-        """
-        user = request.user
-        
-        total_bids = BidRecord.objects.filter(created_by=user).count()
-        won_bids = BidRecord.objects.filter(created_by=user, status='won').count()
-        pending_bids = BidRecord.objects.filter(
-            created_by=user, 
-            status__in=['preparing', 'submitted', 'reviewing']
-        ).count()
-        
-        win_rate = (won_bids / total_bids * 100) if total_bids > 0 else 0
-        
-        recent_bids = BidRecord.objects.filter(
-            created_by=user
-        ).order_by('-created_at')[:5]
-        
-        upcoming_deadlines = BidRecord.objects.filter(
-            created_by=user,
-            status='preparing',
-            tender__deadline_date__gte=timezone.now().date()
-        ).order_by('tender__deadline_date')[:5]
-        
-        return APIResponse.success(data={
-            'summary': {
-                'total_bids': total_bids,
-                'won_bids': won_bids,
-                'pending_bids': pending_bids,
-                'win_rate': round(win_rate, 2)
-            },
-            'recent_bids': BidRecordListSerializer(recent_bids, many=True).data,
-            'upcoming_deadlines': BidRecordListSerializer(upcoming_deadlines, many=True).data
-        })

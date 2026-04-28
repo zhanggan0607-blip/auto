@@ -20,7 +20,7 @@ class DjangoFastAPIBridge:
     """
 
     _instance = None
-    _redis_client = None
+    _initialized = False
 
     def __new__(cls):
         if cls._instance is None:
@@ -28,7 +28,9 @@ class DjangoFastAPIBridge:
         return cls._instance
 
     def __init__(self):
-        self._redis_client = None
+        if not self._initialized:
+            self._redis_client = None
+            DjangoFastAPIBridge._initialized = True
 
     def _get_redis(self):
         """获取Redis连接"""

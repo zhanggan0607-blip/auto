@@ -11,8 +11,9 @@ class ProjectKnowledgeView(APIView):
     """
     项目知识库 API
     提供项目结构、模块、路由等信息，用于AI了解项目
+    仅限管理员访问
     """
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         knowledge = {
@@ -176,8 +177,9 @@ class ProjectContextView(APIView):
     """
     项目上下文 API
     生成供AI使用的项目上下文信息
+    仅限管理员访问
     """
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         context = self.generate_context()

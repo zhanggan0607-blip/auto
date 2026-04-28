@@ -1,6 +1,6 @@
 <template>
   <el-container class="layout-container">
-    <el-aside :width="isCollapse ? '64px' : '220px'" class="layout-aside">
+    <el-aside :width="isCollapse ? '64px' : '240px'" class="layout-aside">
       <div class="logo">
         <div class="logo-icon">
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -28,15 +28,6 @@
           <BreadcrumbNav :items="breadcrumbItems" />
         </div>
         <div class="header-right">
-          <el-tooltip content="模型连接状态" placement="bottom">
-            <div class="model-connection-status" @click="handleConnectionClick">
-              <el-tag :type="connectionStatusType" size="small" effect="plain">
-                <el-icon v-if="isConnecting" class="is-loading"><Loading /></el-icon>
-                <el-icon v-else><component :is="connectionStatusIcon" /></el-icon>
-                {{ connectionStatusText }}
-              </el-tag>
-            </div>
-          </el-tooltip>
           <el-tooltip content="通知中心" placement="bottom">
             <el-badge :value="unreadCount" :hidden="unreadCount === 0" :max="99" class="notification-badge">
               <el-icon class="header-icon" @click="goToNotifications">
@@ -80,12 +71,10 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Bell, User, Setting, ArrowDown, SwitchButton, Loading } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { Bell, User, Setting, ArrowDown, SwitchButton } from '@element-plus/icons-vue'
 import { useUserStore } from '@/store/user'
-import { useModelConnectionStore } from '@/store/modelConnection'
 import { useModelAutoConnect } from '@/composables/useModelAutoConnect'
 import { notificationApi } from '@/api/notification'
 import { SidebarNav, BreadcrumbNav } from '@/components'
@@ -93,8 +82,7 @@ import { SidebarNav, BreadcrumbNav } from '@/components'
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
-const connectionStore = useModelConnectionStore()
-const { autoConnectAfterLogin, manualReconnect, initializeAutoConnect } = useModelAutoConnect()
+const { autoConnectAfterLogin } = useModelAutoConnect()
 
 const isCollapse = ref(false)
 
@@ -106,7 +94,7 @@ const handleCommand = (command) => {
   if (command === 'profile') {
     router.push('/profile')
   } else if (command === 'settings') {
-    router.push('/settings')
+    router.push('/profile')
   } else if (command === 'logout') {
     userStore.logout()
   }
@@ -132,43 +120,6 @@ const breadcrumbItems = computed(() => {
 
 const unreadCount = ref(0)
 
-const isConnecting = computed(() => connectionStore.isConnecting)
-
-const connectionStatusType = computed(() => {
-  const status = connectionStore.connectionStatus
-  if (status === 'connected') return 'success'
-  if (status === 'connecting' || status === 'reconnecting') return 'warning'
-  if (status === 'error') return 'danger'
-  return 'info'
-})
-
-const connectionStatusIcon = computed(() => {
-  const status = connectionStore.connectionStatus
-  if (status === 'connected') return 'CircleCheck'
-  if (status === 'error') return 'CircleClose'
-  return 'Refresh'
-})
-
-const connectionStatusText = computed(() => {
-  return connectionStore.statusText || '未连接'
-})
-
-const handleConnectionClick = async () => {
-  if (connectionStore.isConnecting) {
-    return
-  }
-
-  if (connectionStore.isConnected) {
-    ElMessageBox.confirm('确定要重新连接模型吗？', '重新连接', {
-      type: 'warning'
-    }).then(async () => {
-      await manualReconnect()
-    }).catch(() => {})
-  } else {
-    await manualReconnect()
-  }
-}
-
 const fetchUnreadCount = async () => {
   try {
     const res = await notificationApi.getUnreadCount()
@@ -178,19 +129,22 @@ const fetchUnreadCount = async () => {
   }
 }
 
+let unreadInterval = null
+
 onMounted(async () => {
   if (userStore.isLoggedIn) {
     await autoConnectAfterLogin()
   }
 
   fetchUnreadCount()
-  const interval = setInterval(fetchUnreadCount, 60000)
+  unreadInterval = setInterval(fetchUnreadCount, 60000)
+})
 
-  const cleanup = () => {
-    clearInterval(interval)
+onUnmounted(() => {
+  if (unreadInterval) {
+    clearInterval(unreadInterval)
+    unreadInterval = null
   }
-
-  return cleanup
 })
 
 watch(
@@ -295,21 +249,6 @@ watch(
     display: flex;
     align-items: center;
     gap: var(--spacing-lg);
-
-    .model-connection-status {
-      cursor: pointer;
-      transition: all var(--transition-fast);
-
-      &:hover {
-        opacity: 0.8;
-      }
-
-      .el-tag {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-      }
-    }
 
     .notification-badge {
       cursor: pointer;

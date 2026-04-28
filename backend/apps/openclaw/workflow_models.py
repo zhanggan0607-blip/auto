@@ -353,26 +353,3 @@ class DocumentReview(models.Model):
 
     def __str__(self):
         return f"{self.document.name} - {self.overall_score}分"
-
-    def calculate_overall_score(self):
-        """
-        计算总体评分
-        """
-        weights = {
-            'compliance': 0.35,
-            'completeness': 0.25,
-            'quality': 0.25,
-            'competitiveness': 0.15
-        }
-
-        self.overall_score = int(
-            self.compliance_score * weights['compliance'] +
-            self.completeness_score * weights['completeness'] +
-            self.quality_score * weights['quality'] +
-            self.competitiveness_score * weights['competitiveness']
-        )
-
-        self.is_passed = self.overall_score >= self.pass_threshold
-        self.needs_optimization = self.overall_score < self.pass_threshold
-
-        return self.overall_score

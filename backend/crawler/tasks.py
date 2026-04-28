@@ -15,6 +15,35 @@ from apps.crawler.models import BidProjectTracking, FailureKnowledge, Enterprise
 logger = logging.getLogger(__name__)
 
 
+CRAWLER_REGISTRY = {}
+
+
+def register_crawler(source_code, crawler_class):
+    """
+    注册爬虫类到注册表
+
+    Args:
+        source_code: 数据源代码
+        crawler_class: 爬虫类
+    """
+    CRAWLER_REGISTRY[source_code] = crawler_class
+    logger.debug(f"注册爬虫: {source_code} -> {crawler_class.__name__}")
+
+
+def _auto_register_crawlers():
+    """
+    自动注册已知爬虫 - 从统一注册中心同步
+    """
+    from crawler.crawl_source_registry import crawl_source_registry
+    for code in crawl_source_registry.get_all_codes_and_aliases():
+        crawler_class = crawl_source_registry.get_crawler_class(code)
+        if crawler_class:
+            register_crawler(code, crawler_class)
+
+
+_auto_register_crawlers()
+
+
 def get_pilot_source(code: str, fallback_name: str = None, fallback_base_url: str = None):
     """
     从PILOT_WEBSITES配置获取TenderSource，不存在则创建
@@ -92,10 +121,10 @@ def execute_crawler_task(self, task_id: int):
         page = params.get('page', 1)
         page_size = params.get('page_size', 20)
         
-        if source_code == 'china_gov':
-            from .china_gov_crawler import ChinaGovCrawler
-            crawler = ChinaGovCrawler()
-            results = crawler.crawl(
+        if source_code in CRAWLER_REGISTRY:
+            crawler_class = CRAWLER_REGISTRY[source_code]
+            crawler = crawler_class()
+            crawl_result = crawler.crawl(
                 notice_types=notice_types,
                 keywords=keywords,
                 page=page,
@@ -104,22 +133,27 @@ def execute_crawler_task(self, task_id: int):
                 end_date=end_date,
                 region=region
             )
-        elif source_code == 'sh_gov':
-            from .shanghai_gov_crawler_v2 import ShanghaiGovCrawler
-            crawler = ShanghaiGovCrawler()
-            results = crawler.crawl(
-                notice_types=notice_types,
-                keywords=keywords,
-                page=page,
-                page_size=page_size,
-                start_date=start_date,
-                end_date=end_date
-            )
+            import inspect
+            if inspect.iscoroutine(crawl_result):
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    crawl_result = loop.run_until_complete(crawl_result)
+                finally:
+                    loop.close()
+
+            if hasattr(crawl_result, 'data'):
+                results = crawl_result.data or []
+            elif isinstance(crawl_result, list):
+                results = crawl_result
+            else:
+                results = []
         else:
             results = []
-            logger.warning(f"未知的爬虫来源: {source_code}")
+            logger.warning(f"未注册的爬虫来源: {source_code}，已注册: {list(CRAWLER_REGISTRY.keys())}")
         
         saved_count = 0
+        task_errors = []
         for item in results:
             try:
                 source_url = item.get('source_url', '')
@@ -168,6 +202,12 @@ def execute_crawler_task(self, task_id: int):
                     saved_count += 1
             except Exception as e:
                 logger.error(f"保存招标项目失败: {str(e)}")
+                task_errors.append({
+                    'error_type': '保存失败',
+                    'title': item.get('title', '未知')[:50],
+                    'message': str(e)[:200],
+                    'timestamp': timezone.now().strftime('%Y-%m-%d %H:%M:%S'),
+                })
                 continue
         
         task.status = 'completed'
@@ -177,6 +217,23 @@ def execute_crawler_task(self, task_id: int):
         
         logger.info(f"爬虫任务完成: {task.name}, 保存 {saved_count} 条数据")
         
+        try:
+            from services.crawl_notification_service import crawl_completion_notification_service
+            crawl_completion_notification_service.send_crawler_task_notification(
+                task_id=task.id,
+                task_name=task.name,
+                source_code=source_code,
+                source_url=source.base_url if source else '',
+                result_count=saved_count,
+                total_count=len(results),
+                task_errors=task_errors if task_errors else None,
+                duration=(task.finished_at - task.started_at).total_seconds() if task.started_at and task.finished_at else None,
+                started_at=task.started_at,
+                finished_at=task.finished_at,
+            )
+        except Exception as notify_err:
+            logger.error(f"发送采集完成通知失败: {str(notify_err)}")
+        
     except Exception as e:
         task.status = 'failed'
         task.error_message = str(e)
@@ -184,6 +241,22 @@ def execute_crawler_task(self, task_id: int):
         task.save()
         
         logger.error(f"爬虫任务执行失败: {task.name}, 错误: {str(e)}")
+        
+        try:
+            from services.crawl_notification_service import crawl_completion_notification_service
+            crawl_completion_notification_service.send_crawler_task_notification(
+                task_id=task.id,
+                task_name=task.name,
+                source_code=task.source.code if task.source else '',
+                source_url=task.source.base_url if task.source else '',
+                result_count=0,
+                error_message=str(e),
+                duration=(task.finished_at - task.started_at).total_seconds() if task.started_at and task.finished_at else None,
+                started_at=task.started_at,
+                finished_at=task.finished_at,
+            )
+        except Exception as notify_err:
+            logger.error(f"发送采集失败通知失败: {str(notify_err)}")
         
         raise self.retry(exc=e, countdown=60)
 
@@ -419,14 +492,268 @@ def check_bid_results():
 def _check_single_bid_result(project: BidProjectTracking) -> dict:
     """
     检查单个项目的中标结果
-    
+
     Args:
         project: 已投标项目跟踪记录
-        
+
     Returns:
-        dict: 检查结果
+        dict: 检查结果，包含status(pending/won/lost)、winner_name、winner_amount、our_rank、announce_date
     """
-    return None
+    try:
+        source_code = project.tender_source or ''
+
+        if 'shanghai' in source_code.lower() or 'zfcg.sh.gov.cn' in project.tender_url.lower():
+            result = _check_shanghai_bid_result(project)
+        elif 'ccgp' in source_code.lower() or 'ccgp.gov.cn' in project.tender_url.lower():
+            result = _check_china_gov_bid_result(project)
+        else:
+            result = _check_generic_bid_result(project)
+
+        return result
+
+    except Exception as e:
+        logger.error(f"检查中标结果异常 {project.tender_title}: {str(e)}")
+        return None
+
+
+def _check_shanghai_bid_result(project: BidProjectTracking) -> dict:
+    """
+    检查上海市政府采购网中标结果
+    """
+    import re
+
+    try:
+        from crawler.shanghai_gov_crawler_v2 import ShanghaiGovCrawler
+
+        tender_title = project.tender_title
+        keywords = re.sub(r'[^\w\u4e00-\u9fff]', ' ', tender_title)
+        keywords = ' '.join(keywords.split())[:50]
+
+        async def crawl_and_match():
+            crawler = ShanghaiGovCrawler()
+
+            result = await crawler.crawl(
+                notice_types=['zbjg', 'cgjg'],
+                keywords=[keywords],
+                page=1,
+                page_size=20
+            )
+
+            if not result or not result.items:
+                return None
+
+            for item in result.items:
+                item_title = item.get('title', '')
+                item_url = item.get('url', '')
+                item_content = item.get('content', '') or ''
+
+                if tender_title[:20] in item_title or item_title[:20] in tender_title:
+                    winner_name = item.get('winner_name') or item.get('company_name')
+                    winner_amount = item.get('amount') or item.get('budget')
+
+                    if not winner_name:
+                        winner_match = re.search(r'中标单位[：:]\s*([^\n\r]+)', item_content)
+                        if winner_match:
+                            winner_name = winner_match.group(1).strip()
+
+                    if not winner_amount:
+                        amount_match = re.search(r'(?:中标|成交)?金额[：:]\s*([\d,.]+\s*(?:万元|元|万))?', item_content)
+                        if amount_match:
+                            winner_amount = amount_match.group(1).strip()
+
+                    announce_date = item.get('publish_date') or item.get('announce_date')
+
+                    bid_company = project.bid_company or ''
+
+                    if winner_name and bid_company:
+                        is_won = winner_name in bid_company or bid_company in winner_name
+                    else:
+                        is_won = False
+
+                    return {
+                        'status': 'won' if is_won else 'lost',
+                        'winner_name': winner_name or '未知',
+                        'winner_amount': winner_amount,
+                        'our_rank': 1 if is_won else None,
+                        'announce_date': announce_date
+                    }
+
+            return None
+
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(crawl_and_match())
+            finally:
+                loop.close()
+            return result
+        except Exception as e:
+            logger.warning(f"上海市采购网检查失败: {str(e)}")
+            return None
+
+    except ImportError:
+        logger.warning("上海爬虫模块不可用")
+        return None
+    except Exception as e:
+        logger.error(f"上海采购网检查异常: {str(e)}")
+        return None
+
+
+def _check_china_gov_bid_result(project: BidProjectTracking) -> dict:
+    """
+    检查中国政府采购网中标结果
+    """
+    import re
+
+    try:
+        from crawler.china_gov_crawler import ChinaGovCrawler
+
+        tender_title = project.tender_title
+        keywords = re.sub(r'[^\w\u4e00-\u9fff]', ' ', tender_title)
+        keywords = ' '.join(keywords.split())[:50]
+
+        async def crawl_and_match():
+            crawler = ChinaGovCrawler()
+
+            result = await crawler.crawl(
+                notice_types=['zbjg'],
+                keywords=[keywords],
+                page=1,
+                page_size=20
+            )
+
+            if not result or not result.items:
+                return None
+
+            for item in result.items:
+                item_title = item.get('title', '')
+                item_url = item.get('url', '')
+                item_content = item.get('content', '') or ''
+
+                if tender_title[:20] in item_title or item_title[:20] in tender_title:
+                    winner_name = item.get('winner_name') or item.get('company_name')
+                    winner_amount = item.get('amount') or item.get('budget')
+
+                    if not winner_name:
+                        winner_match = re.search(r'中标(?:候补)?(?:供应商|单位)[：:]\s*([^\n\r]+)', item_content)
+                        if winner_match:
+                            winner_name = winner_match.group(1).strip()
+
+                    if not winner_amount:
+                        amount_match = re.search(r'(?:中标|成交)(?:金额|报价)[：:]\s*([\d,.]+\s*(?:万元|元|万))?', item_content)
+                        if amount_match:
+                            winner_amount = amount_match.group(1).strip()
+
+                    announce_date = item.get('publish_date') or item.get('announce_date')
+
+                    bid_company = project.bid_company or ''
+
+                    if winner_name and bid_company:
+                        is_won = winner_name in bid_company or bid_company in winner_name
+                    else:
+                        is_won = False
+
+                    return {
+                        'status': 'won' if is_won else 'lost',
+                        'winner_name': winner_name or '未知',
+                        'winner_amount': winner_amount,
+                        'our_rank': 1 if is_won else None,
+                        'announce_date': announce_date
+                    }
+
+            return None
+
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(crawl_and_match())
+            finally:
+                loop.close()
+            return result
+        except Exception as e:
+            logger.warning(f"中国政府采购网检查失败: {str(e)}")
+            return None
+
+    except ImportError:
+        logger.warning("中国政府采购网爬虫模块不可用")
+        return None
+    except Exception as e:
+        logger.error(f"中国政府采购网检查异常: {str(e)}")
+        return None
+
+
+def _check_generic_bid_result(project: BidProjectTracking) -> dict:
+    """
+    通用中标结果检查（通过LLM分析）
+    """
+    try:
+        from services.unified_llm_service import unified_llm_service
+
+        tender_title = project.tender_title
+        tender_url = project.tender_url
+        bid_company = project.bid_company or ''
+
+        prompt = f"""请帮我查询以下招标项目的中标结果：
+
+项目名称：{tender_title}
+项目链接：{tender_url}
+
+请访问上述链接，分析页面内容，提取：
+1. 是否已有中标公告
+2. 中标单位名称
+3. 中标金额（如有）
+4. 公告发布日期
+
+如果没有找到中标公告，请说明"未找到中标公告"。
+
+请以JSON格式返回：
+{{"status": "pending/won/lost", "winner_name": "中标单位", "winner_amount": "金额", "announce_date": "日期", "reason": "说明"}}
+"""
+
+        async def query_with_llm():
+            try:
+                result = await unified_llm_service.chat(message=prompt)
+                content = result.get('content', '')
+
+                import json
+                import re
+                json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                if json_match:
+                    data = json.loads(json_match.group())
+                    status = data.get('status', 'pending')
+
+                    if status == 'won':
+                        is_won = bid_company and (bid_company in data.get('winner_name', '') or data.get('winner_name', '') in bid_company)
+                        status = 'won' if is_won else 'lost'
+
+                    return {
+                        'status': status,
+                        'winner_name': data.get('winner_name'),
+                        'winner_amount': data.get('winner_amount'),
+                        'our_rank': 1 if status == 'won' else None,
+                        'announce_date': data.get('announce_date')
+                    }
+            except Exception as e:
+                logger.warning(f"LLM查询失败: {str(e)}")
+            return None
+
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(query_with_llm())
+            finally:
+                loop.close()
+            return result
+        except Exception as e:
+            logger.warning(f"通用中标结果检查失败: {str(e)}")
+            return None
+
+    except Exception as e:
+        logger.error(f"通用中标结果检查异常: {str(e)}")
+        return None
 
 
 @shared_task
@@ -611,7 +938,7 @@ def scheduled_crawl_with_match(self, schedule_id: int):
             task_id=task_id,
             task_name=f"采集任务: {schedule.name}",
             total_steps=100,
-            description=f"网站: {schedule.website_template.name}",
+            description=f"网站: {schedule.website_template.name if schedule.website_template else '未指定'}",
             schedule_id=schedule_id,
             steps=progress_steps
         )
@@ -664,18 +991,33 @@ def scheduled_crawl_with_match(self, schedule_id: int):
         from openclaw.skill_registry import skill_registry
 
         website_code = template.code if template else ''
-        source_mapping = {
-            'china_gov': 'china_gov',
-            'shanghai_gov': 'shanghai_gov',
-            'ccgp': 'china_gov',
-            'zbtb': 'china_gov',
-        }
+        website_type = getattr(template, 'website_type', '') or ''
+
+        from crawler.crawl_source_registry import crawl_source_registry
+
+        source = crawl_source_registry.resolve_source(website_code)
+
+        if not crawl_source_registry.is_registered(source):
+            if 'construction' in website_code.lower() or 'construction' in (getattr(template, 'name', '') or '').lower():
+                source = 'sh_construction'
+            elif 'shanghai' in website_code.lower() or 'shanghai' in (getattr(template, 'name', '') or '').lower():
+                source = 'shanghai_gov'
+            else:
+                source = 'china_gov'
+            source = crawl_source_registry.resolve_source(source)
 
         notice_type_mapping = {
             'gkzb': ['gkzb'],
             'jzxcs': ['jzxcs'],
             'jzxtp': ['jzxtp'],
             'xjcg': ['xjcg'],
+        }
+
+        source_default_notice_types = {
+            'sh_construction': ['zbgg', 'zbjg', 'gzgg', 'fbgg', 'htgg'],
+            'shanghai_gov': ['gkzb', 'jzxcs', 'jzxtp', 'xjcg'],
+            'china_gov': ['gkzb', 'jzxcs', 'jzxtp', 'xjcg'],
+            'sh_procurement': ['gkzb', 'jzxcs', 'jzxtp', 'xjcg'],
         }
 
         notice_types = []
@@ -689,50 +1031,63 @@ def scheduled_crawl_with_match(self, schedule_id: int):
                 else:
                     notice_types.append(nt)
         else:
-            notice_types = ['gkzb', 'jzxcs', 'jzxtp', 'xjcg']
+            notice_types = source_default_notice_types.get(source, ['gkzb', 'jzxcs', 'jzxtp', 'xjcg'])
 
         async def async_crawl():
             try:
-                skill_result = await skill_registry.execute_skill(
-                    'government_tender_collector',
-                    source=source_mapping.get(website_code, 'china_gov'),
-                    keywords=keywords,
-                    notice_types=notice_types,
-                    page=1,
-                    page_size=20 * max_pages
-                )
-                return skill_result.data if skill_result else []
+                crawler_class = crawl_source_registry.get_crawler_class(source)
+                if crawler_class:
+                    crawler = crawler_class()
+                    crawl_kwargs = {
+                        'notice_types': notice_types,
+                        'keywords': keywords,
+                        'page': 1,
+                        'page_size': 20,
+                        'start_date': date_params.get('start_date'),
+                        'end_date': date_params.get('end_date'),
+                    }
+                    if crawl_source_registry.supports_max_pages(source):
+                        crawl_kwargs['max_pages'] = max_pages
+                    
+                    result = await crawler.crawl(**crawl_kwargs)
+                    
+                    if hasattr(result, 'success') and hasattr(result, 'data'):
+                        if result.success and result.data:
+                            logger.info(f"{source} 采集完成，共 {len(result.data)} 条")
+                            return result.data
+                        logger.info(f"{source} 采集无数据")
+                        return []
+                    elif isinstance(result, list):
+                        logger.info(f"{source} 采集完成，共 {len(result)} 条")
+                        return result
+                    else:
+                        logger.info(f"{source} 采集无数据")
+                        return []
+                else:
+                    skill_result = await skill_registry.execute_skill(
+                        'government_tender_collector',
+                        source=source,
+                        keywords=keywords,
+                        notice_types=notice_types,
+                        page=1,
+                        page_size=20,
+                        max_pages=max_pages,
+                        start_date=date_params.get('start_date'),
+                        end_date=date_params.get('end_date')
+                    )
+                    return skill_result.data if skill_result else []
             except Exception as e:
-                logger.error(f"skill_registry 采集失败: {str(e)}")
+                logger.error(f"采集失败: {str(e)}")
                 return []
-
-        import asyncio
-        from concurrent.futures import ThreadPoolExecutor
 
         progress_tracker.update_progress(task_id, 3, 20, "正在采集第 1 页...")
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        def run_async_crawl():
-            asyncio.set_event_loop(loop)
-            return loop.run_until_complete(async_crawl())
-
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(run_async_crawl)
-            page_count = 0
-            while not future.done():
-                page_count += 1
-                progress_pct = min(20 + page_count, 35)
-                progress_tracker.update_progress(
-                    task_id, 3, progress_pct,
-                    f"采集中... (第 {page_count} 页，预计 5-{10 * max_pages} 秒)"
-                )
-                import time
-                time.sleep(3)
-
-            results = future.result()
-
-        loop.close()
+        try:
+            results = loop.run_until_complete(async_crawl())
+        finally:
+            loop.close()
 
         if results:
             progress_tracker.update_progress(task_id, 3, 35, f"采集完成，已获取 {len(results)} 条数据")
@@ -742,8 +1097,55 @@ def scheduled_crawl_with_match(self, schedule_id: int):
             logger.warning(f"采集完成，未获取到数据")
         crawl_results = []
 
-        progress_tracker.update_progress(task_id, 5, 50, "正在保存采集结果...")
+        allowed_provinces = set()
+        DIRECT_MUNICIPALITIES = {'上海', '北京', '天津', '重庆'}
+        if schedule.regions:
+            try:
+                import json
+                regions_data = json.loads(schedule.regions) if isinstance(schedule.regions, str) else schedule.regions
+                for region_path in regions_data:
+                    if len(region_path) >= 1:
+                        province = region_path[0].replace('市', '').replace('省', '')
+                        allowed_provinces.add(province)
+                        if len(region_path) >= 2:
+                            city = region_path[1].replace('市', '').replace('省', '')
+                            allowed_provinces.add(city)
+                        if len(region_path) >= 3:
+                            district = region_path[2].replace('区', '').replace('县', '').replace('市', '')
+                            allowed_provinces.add(district)
+                            allowed_provinces.add(region_path[2])
+            except Exception as e:
+                logger.warning(f"解析地区配置失败: {str(e)}, 将不过滤地区")
+
+        progress_tracker.update_progress(task_id, 6, 50, "正在保存采集结果...")
+        saved_to_tenders = 0
+        skipped_duplicates = 0
+        existing_titles = set(TenderProject.objects.values_list('title', flat=True))
+        crawl_errors = []
+
         for result in results:
+            result_region = result.get('region', '')
+            if allowed_provinces and result_region:
+                result_region_clean = result_region.replace('市', '').replace('省', '').replace('采购人：', '').strip()
+                result_region_no_suffix = result_region_clean.replace('区', '').replace('县', '')
+                matched = any(p in result_region_clean for p in allowed_provinces)
+                if not matched:
+                    matched = any(p in result_region_no_suffix for p in allowed_provinces)
+                if not matched and any(m in result_region for m in ['区', '县']):
+                    for m in DIRECT_MUNICIPALITIES:
+                        if m in allowed_provinces:
+                            matched = True
+                            break
+                if not matched:
+                    logger.info(f"跳过地区不匹配的数据: {result_region} (期望: {allowed_provinces})")
+                    continue
+
+            result_title = result.get('title', '').strip()
+            if result_title in existing_titles:
+                skipped_duplicates += 1
+                logger.info(f"跳过重复项目: {result_title[:50]}...")
+                continue
+
             crawl_result = CrawlResult.objects.create(
                 session=session,
                 title=result.get('title', ''),
@@ -764,6 +1166,7 @@ def scheduled_crawl_with_match(self, schedule_id: int):
                 status='pending'
             )
             crawl_results.append(crawl_result)
+            existing_titles.add(result.get('title', '').strip())
 
         session.status = 'completed'
         session.result_count = len(results)
@@ -775,10 +1178,18 @@ def scheduled_crawl_with_match(self, schedule_id: int):
 
         progress_tracker.update_progress(task_id, 6, 65, f"正在将 {len(crawl_results)} 条数据转换为招标项目...")
         saved_to_tenders = 0
+        tender_titles = set(TenderProject.objects.values_list('title', flat=True))
         for i, crawl_result in enumerate(crawl_results):
             try:
                 source_url = crawl_result.source_url
                 if not source_url:
+                    continue
+
+                crawl_title = crawl_result.title.strip()
+                if crawl_title in tender_titles:
+                    logger.info(f"跳过重复招标项目(标题已存在): {crawl_title[:50]}...")
+                    crawl_result.status = 'skipped'
+                    crawl_result.save(update_fields=['status'])
                     continue
 
                 source, _ = TenderSource.objects.get_or_create(
@@ -791,29 +1202,26 @@ def scheduled_crawl_with_match(self, schedule_id: int):
                     }
                 )
 
-                tender, created = TenderProject.objects.update_or_create(
+                tender = TenderProject.objects.create(
+                    title=crawl_result.title,
+                    project_code=crawl_result.project_code or '',
+                    source=source,
                     source_url=source_url,
-                    defaults={
-                        'title': crawl_result.title,
-                        'project_code': crawl_result.project_code or '',
-                        'source': source,
-                        'publish_date': crawl_result.publish_date,
-                        'region': crawl_result.region or '',
-                        'industry': crawl_result.industry or '',
-                        'category': crawl_result.category or '',
-                        'purchaser_name': crawl_result.purchaser_name or '',
-                        'purchaser_contact': crawl_result.purchaser_contact or '',
-                        'purchaser_phone': crawl_result.purchaser_phone or '',
-                        'agency_name': crawl_result.agency_name or '',
-                        'budget': crawl_result.budget,
-                        'description': crawl_result.description or '',
-                        'status': 'pending',
-                        'raw_data': crawl_result.raw_data,
-                    }
+                    publish_date=crawl_result.publish_date,
+                    region=crawl_result.region or '',
+                    industry=crawl_result.industry or '',
+                    category=crawl_result.category or '',
+                    purchaser_name=crawl_result.purchaser_name or '',
+                    purchaser_contact=crawl_result.purchaser_contact or '',
+                    purchaser_phone=crawl_result.purchaser_phone or '',
+                    agency_name=crawl_result.agency_name or '',
+                    budget=crawl_result.budget,
+                    description=crawl_result.description or '',
+                    status='pending',
+                    raw_data=crawl_result.raw_data,
                 )
-
-                if created:
-                    saved_to_tenders += 1
+                tender_titles.add(crawl_title)
+                saved_to_tenders += 1
 
                 crawl_result.status = 'processed'
                 crawl_result.save(update_fields=['status'])
@@ -835,34 +1243,62 @@ def scheduled_crawl_with_match(self, schedule_id: int):
         for crawl_result in crawl_results:
             try:
                 from openclaw.agents.content_recognition_agent import ContentRecognitionAgent
-                import asyncio
 
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
 
                 async def run_recognition():
                     agent = ContentRecognitionAgent()
+                    raw = crawl_result.raw_data or {}
+                    raw.update({
+                        'title': crawl_result.title,
+                        'source_url': crawl_result.source_url,
+                        'publish_date': str(crawl_result.publish_date) if crawl_result.publish_date else None,
+                        'region': crawl_result.region or '',
+                        'project_code': crawl_result.project_code or '',
+                        'budget': crawl_result.budget,
+                        'purchaser_name': crawl_result.purchaser_name or '',
+                        'agency_name': crawl_result.agency_name or '',
+                        'description': crawl_result.description or '',
+                    })
                     return await agent.execute({
                         'content': '',
                         'url': crawl_result.source_url,
                         'source_type': template.website_type if template else 'other',
                         'content_type': 'tender',
-                        'raw_data': crawl_result.raw_data or {},
+                        'raw_data': raw,
                         'save_to_db': True,
                         'validate_quality': True
                     })
 
-                result = loop.run_until_complete(run_recognition())
-                loop.close()
+                try:
+                    result = loop.run_until_complete(run_recognition())
+                finally:
+                    loop.close()
 
                 if result.success:
                     recognized_count += 1
                 else:
+                    logger.warning(f"内容识别返回失败 {crawl_result.id}: {result.error}")
                     recognition_errors += 1
+                    crawl_errors.append({
+                        'error_type': '内容识别失败',
+                        'title': crawl_result.title[:50],
+                        'message': str(result.error)[:200] if result.error else '未知错误',
+                        'timestamp': timezone.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    })
 
             except Exception as e:
+                import traceback
                 logger.warning(f"内容识别失败 {crawl_result.id}: {str(e)}")
+                logger.debug(f"堆栈: {traceback.format_exc()}")
                 recognition_errors += 1
+                crawl_errors.append({
+                    'error_type': '内容识别异常',
+                    'title': crawl_result.title[:50],
+                    'message': str(e)[:200],
+                    'timestamp': timezone.now().strftime('%Y-%m-%d %H:%M:%S'),
+                })
                 continue
 
         logger.info(f"内容识别完成: 成功 {recognized_count}, 失败 {recognition_errors}")
@@ -890,7 +1326,8 @@ def scheduled_crawl_with_match(self, schedule_id: int):
         schedule_log.duration = (schedule_log.finished_at - schedule_log.started_at).total_seconds()
         schedule_log.details = {
             'recognized_count': recognized_count,
-            'recognition_errors': recognition_errors
+            'recognition_errors': recognition_errors,
+            'errors': crawl_errors
         }
         schedule_log.save()
 
@@ -911,6 +1348,39 @@ def scheduled_crawl_with_match(self, schedule_id: int):
 
         from apps.tenders.services import TenderService
         TenderService.invalidate_tender_cache()
+
+        if len(results) == 0 and template:
+            from apps.crawler.assurance_service import crawl_assurance_service
+            should_trigger, consecutive = crawl_assurance_service.check_consecutive_failures(template.id)
+            if should_trigger:
+                logger.info(f"采集结果为空且连续{consecutive}次失败，自动触发保障检查: {template.name}")
+                run_crawl_assurance.delay(
+                    template_id=template.id,
+                    target_url=template.base_url,
+                    created_by_id=schedule.created_by_id if schedule.created_by else None,
+                )
+            else:
+                logger.info(f"采集结果为空，但未达连续失败阈值({consecutive}/{crawl_assurance_service.CONSECUTIVE_FAILURE_THRESHOLD})")
+
+        try:
+            from services.crawl_notification_service import crawl_completion_notification_service
+            crawl_completion_notification_service.send_crawl_completion_notification(
+                schedule_id=schedule_id,
+                schedule_name=schedule.name,
+                target_url=template.base_url if template else '',
+                result_count=len(results),
+                saved_count=saved_to_tenders,
+                recognized_count=recognized_count,
+                recognition_errors=recognition_errors,
+                matched_count=matched_count,
+                deleted_count=deleted_count,
+                duration=schedule_log.duration,
+                started_at=schedule_log.started_at,
+                finished_at=schedule_log.finished_at,
+                details=schedule_log.details,
+            )
+        except Exception as notify_err:
+            logger.error(f"发送采集完成通知失败: {str(notify_err)}")
 
         return {
             'schedule_id': schedule_id,
@@ -942,6 +1412,22 @@ def scheduled_crawl_with_match(self, schedule_id: int):
         schedule.error_count += 1
         schedule.last_error = str(e)
         schedule.save(update_fields=['error_count', 'last_error'])
+
+        try:
+            from services.crawl_notification_service import crawl_completion_notification_service
+            crawl_completion_notification_service.send_crawl_completion_notification(
+                schedule_id=schedule_id,
+                schedule_name=schedule.name,
+                target_url=schedule.website_template.base_url if schedule.website_template else '',
+                result_count=0,
+                saved_count=0,
+                error_message=str(e),
+                duration=schedule_log.duration,
+                started_at=schedule_log.started_at,
+                finished_at=schedule_log.finished_at,
+            )
+        except Exception as notify_err:
+            logger.error(f"发送采集失败通知失败: {str(notify_err)}")
 
         raise self.retry(exc=e, countdown=300)
 
@@ -1002,7 +1488,8 @@ def run_batch_template_test(self, task_id: str, template_ids: list):
     """
     from apps.crawler.models import WebsiteTemplate
     from apps.crawler.services import UniversalCrawlerEngine
-    from crawler.base_crawler import CrawlerConfig
+    from crawler.base_crawler import BaseCrawler
+    from common.crawler import CrawlerConfig
     from core.progress_tracker import progress_tracker
 
     logger.info(f"开始批量测试任务: {task_id}, 共 {len(template_ids)} 个模板")
@@ -1322,3 +1809,70 @@ def sync_crawl_results_to_tenders(limit: int = 100):
     except Exception as e:
         logger.error(f"定时同步失败: {str(e)}")
         raise
+
+
+@shared_task(bind=True, max_retries=1)
+def run_crawl_assurance(self, template_id: int, target_url: str = None, created_by_id: int = None):
+    """
+    执行采集保障检查-修复-爬取流程
+
+    Args:
+        template_id: 网站模板ID
+        target_url: 目标URL（可选，默认使用模板的base_url）
+        created_by_id: 创建人ID
+    """
+    from apps.crawler.assurance_service import crawl_assurance_service
+
+    try:
+        report = crawl_assurance_service.run_assurance_cycle(
+            template_id=template_id,
+            target_url=target_url,
+            created_by_id=created_by_id,
+        )
+
+        logger.info(
+            f"采集保障完成: 模板{template_id}, 状态={report.status}, "
+            f"尝试{report.attempt_count}次, 采集{report.data_collected}条"
+        )
+
+        return {
+            'report_id': report.id,
+            'status': report.status,
+            'attempt_count': report.attempt_count,
+            'data_collected': report.data_collected,
+            'final_result': report.final_result,
+        }
+
+    except Exception as e:
+        logger.error(f"采集保障执行失败: {str(e)}")
+        raise
+
+
+@shared_task
+def check_all_template_health():
+    """
+    定时检查所有活跃网站模板的健康状态
+    对连续失败的模板自动触发保障机制
+    """
+    from apps.crawler.assurance_service import crawl_assurance_service
+    from apps.crawler.models import WebsiteTemplate
+
+    active_templates = WebsiteTemplate.objects.filter(is_active=True)
+    triggered = 0
+
+    for template in active_templates:
+        try:
+            should_trigger, consecutive = crawl_assurance_service.check_consecutive_failures(template.id)
+            if should_trigger:
+                run_crawl_assurance.delay(
+                    template_id=template.id,
+                    target_url=template.base_url,
+                )
+                triggered += 1
+                logger.info(f"已触发保障检查: {template.name} (连续{consecutive}次失败)")
+        except Exception as e:
+            logger.error(f"检查模板健康状态失败 {template.name}: {str(e)}")
+            continue
+
+    logger.info(f"健康检查完成: 检查{active_templates.count()}个模板, 触发{triggered}个保障流程")
+    return {'checked': active_templates.count(), 'triggered': triggered}

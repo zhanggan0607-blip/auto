@@ -167,10 +167,12 @@ class EnterpriseSerializer(serializers.ModelSerializer):
         date_fields = ['establishment_date']
         decimal_fields = ['registered_capital', 'min_net_assets', 'max_debt_ratio',
                           'min_credit_line', 'min_working_capital', 'min_registered_capital']
+        integer_fields = ['staff_count', 'insured_count']
         string_fields = ['address', 'credit_code', 'legal_person', 'province', 'city',
                          'district', 'contact_person', 'contact_phone', 'contact_email',
                          'bank_name', 'bank_account', 'enterprise_type', 'enterprise_scale',
                          'business_scope']
+        default_value_fields = {'auto_bid_threshold': 60}
 
         data = data.copy() if hasattr(data, 'copy') else dict(data)
 
@@ -181,6 +183,14 @@ class EnterpriseSerializer(serializers.ModelSerializer):
         for field in decimal_fields:
             if field in data and data[field] == '':
                 data[field] = None
+
+        for field in integer_fields:
+            if field in data and (data[field] == '' or data[field] is None):
+                data[field] = None
+
+        for field, default_val in default_value_fields.items():
+            if field in data and (data[field] == '' or data[field] is None):
+                data[field] = default_val
 
         for field in string_fields:
             if field in data and data[field] == '':
@@ -201,13 +211,13 @@ class EnterpriseSerializer(serializers.ModelSerializer):
         return super().to_internal_value(data)
     
     def to_representation(self, instance):
-        """
-        输出时解密敏感字段
-        """
         data = super().to_representation(instance)
         if data.get('bank_account'):
-            decrypted = AESCrypto.decrypt(data['bank_account'])
-            data['bank_account'] = decrypted
+            try:
+                decrypted = AESCrypto.decrypt(data['bank_account'])
+                data['bank_account'] = decrypted
+            except Exception:
+                data['bank_account'] = ''
         return data
 
 
@@ -218,6 +228,7 @@ class EnterpriseListSerializer(serializers.ModelSerializer):
     enterprise_type_display = serializers.CharField(source='get_enterprise_type_display', read_only=True)
     qualification_count = serializers.SerializerMethodField()
     performance_count = serializers.SerializerMethodField()
+    bank_account_masked = serializers.SerializerMethodField()
     
     class Meta:
         model = Enterprise
@@ -225,22 +236,35 @@ class EnterpriseListSerializer(serializers.ModelSerializer):
                   'credit_code', 'province', 'city', 'district', 'address',
                   'legal_person', 'registered_capital', 'establishment_date',
                   'contact_person', 'contact_phone', 'contact_email',
-                  'bank_name', 'bank_account', 'enterprise_scale',
+                  'bank_name', 'bank_account', 'bank_account_masked', 'enterprise_scale',
                   'staff_count', 'insured_count', 'business_scope',
                   'is_active', 'is_verified', 'qualification_count', 
                   'performance_count', 'created_at']
     
     def get_qualification_count(self, obj):
-        """
-        获取资质数量
-        """
         return obj.qualifications.count()
     
     def get_performance_count(self, obj):
-        """
-        获取业绩数量
-        """
         return obj.performances.count()
+    
+    def get_bank_account_masked(self, obj):
+        if obj.bank_account:
+            try:
+                decrypted = AESCrypto.decrypt(obj.bank_account)
+                return mask_sensitive_data(decrypted, 'bank_account')
+            except Exception:
+                return ''
+        return ''
+    
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if data.get('bank_account'):
+            try:
+                decrypted = AESCrypto.decrypt(data['bank_account'])
+                data['bank_account'] = decrypted
+            except Exception:
+                data['bank_account'] = ''
+        return data
 
 
 class EnterpriseMatchRuleSerializer(serializers.ModelSerializer):

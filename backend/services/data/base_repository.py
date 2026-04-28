@@ -2,7 +2,7 @@
 仓储基类
 提供通用的数据访问接口
 """
-from typing import TypeVar, Generic, List, Optional, Dict, Any
+from typing import TypeVar, Generic, Type, List, Optional, Dict, Any
 from django.db import models
 from django.db.models import QuerySet
 

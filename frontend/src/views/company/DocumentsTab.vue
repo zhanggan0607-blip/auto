@@ -31,7 +31,7 @@
       </el-table-column>
       <el-table-column prop="status_display" label="状态" width="80">
         <template #default="{ row }">
-          <el-tag :type="getStatusType(row.status)" size="small">{{ row.status_display }}</el-tag>
+          <el-tag :type="getStatusType('enterprise_doc_status', 'enterprise_doc_status', row.status)" size="small">{{ row.status_display }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="150" fixed="right">
@@ -52,6 +52,7 @@
 <script setup>
 import { ref } from 'vue'
 import { Upload, View, Delete, Star } from '@element-plus/icons-vue'
+import { getStatusType } from '@/store/constants'
 
 const { list, loading, typeOptions, statusOptions } = defineProps({
   list: {
@@ -76,16 +77,6 @@ const emit = defineEmits(['upload', 'preview', 'delete', 'filter'])
 
 const filterType = ref('')
 const filterStatus = ref('')
-
-const getStatusType = (status) => {
-  const types = {
-    valid: 'success',
-    expiring: 'warning',
-    expired: 'danger',
-    pending: 'info'
-  }
-  return types[status] || 'info'
-}
 
 const getExpiryClass = (row) => {
   if (!row.expiry_date) return ''
@@ -120,15 +111,15 @@ const handleDelete = (row) => emit('delete', row)
 }
 
 .primary-icon {
-  color: #E6A23C;
+  color: #EA580C;
   margin-right: 4px;
 }
 
 .expiry-expired {
-  color: #F56C6C;
+  color: #DC2626;
 }
 
 .expiry-expiring {
-  color: #E6A23C;
+  color: #EA580C;
 }
 </style>

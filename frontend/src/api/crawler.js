@@ -32,11 +32,15 @@ export const crawlerApi = {
     if (excludeId) {
       params.exclude_id = excludeId
     }
-    return request.get(`${BASE_URL}/templates/check_duplicate_code/`, params)
+    return request.get(`${BASE_URL}/templates/check_duplicate_code/`, { params })
   },
 
   testWebsiteTemplate(id) {
     return request.post(`${BASE_URL}/templates/${id}/test/`)
+  },
+
+  testWebsiteTemplateConfig(data) {
+    return request.post(`${BASE_URL}/templates/test_config/`, data)
   },
 
   getCrawlSchedules(params) {
@@ -80,27 +84,6 @@ export const crawlerApi = {
     if (excludeId) {
       params.exclude_id = excludeId
     }
-    return request.get(`${BASE_URL}/schedules/check_duplicate_name/`, params)
-  },
-
-  executeQualificationMatch(data) {
-    return request.post(`${BASE_URL}/qualification-match/match/`, data)
-  },
-
-  previewQualificationMatch(data) {
-    return request.post(`${BASE_URL}/qualification-match/preview/`, data)
-  },
-
-  quickCrawl(data) {
-    return request.post(`${BASE_URL}/sessions/quick-crawl/`, data)
-  },
-
-  batchTestTemplates(templateIds = null) {
-    const data = templateIds ? { template_ids: templateIds } : {}
-    return request.post(`${BASE_URL}/templates/batch_test/`, data)
-  },
-
-  getBatchTestProgress(taskId) {
-    return request.get(`${BASE_URL}/templates/batch_test/${taskId}/`)
+    return request.get(`${BASE_URL}/schedules/check_duplicate_name/`, { params })
   }
 }

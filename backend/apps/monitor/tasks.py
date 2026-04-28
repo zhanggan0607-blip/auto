@@ -15,12 +15,18 @@ def check_all_services_health():
     默认每30秒执行一次
     """
     from .health_checker import ServiceHealthMonitor
-    from .restart_manager import AlertManager
+    from .restart_manager import AlertManager, PostgresGuardian
     from .models import MonitoredService
 
     logger.info("开始执行定时健康检查...")
 
     try:
+        pg_ok, pg_msg = PostgresGuardian.ensure_postgres_running()
+        if not pg_ok:
+            logger.warning(f"PostgreSQL守护检查失败: {pg_msg}")
+        else:
+            logger.info(f"PostgreSQL守护检查成功: {pg_msg}")
+
         result = ServiceHealthMonitor.check_all_services()
         logger.info(f"健康检查完成: {result['healthy']}/{result['total']} 服务正常")
 

@@ -1,6 +1,9 @@
 """
 URL configuration for bid_auto_system project.
 """
+import os
+import re
+import socket
 import threading
 import time
 from django.contrib import admin
@@ -12,12 +15,13 @@ from django.db import connection
 from django.core.cache import cache
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 from core.constants_views import ConstantsAPIView, ConstantsDetailAPIView
-from apps.openclaw.views import SystemModelsView
 from apps.knowledge.views import ProjectKnowledgeView, ProjectContextView
 
 
 _services_cache = {'data': None, 'expires': 0}
 _services_cache_lock = threading.Lock()
+_optional_services_down = {}
+_optional_services_down_lock = threading.Lock()
 
 
 def api_root(request):
@@ -38,7 +42,6 @@ def api_root(request):
             'enterprise': '/api/v1/enterprise/',
             'openclaw': '/api/v1/openclaw/',
             'vectorlib': '/api/v1/vectorlib/',
-            'scheduler': '/api/v1/scheduler/',
             'monitor': '/api/v1/monitor/',
             'progress': '/api/v1/progress/',
             'docs': '/api/v1/docs/',
@@ -50,35 +53,82 @@ def api_root(request):
 def health_check(request):
     """
     健康检查端点 - 用于Docker健康检查和负载均衡器探测
-    检查数据库和缓存连接状态
+    检查数据库（主库+从库）、缓存（Redis）和向量数据库连接状态
     """
+    from django.conf import settings
+    import urllib.request
+
     health_status = {
         'status': 'healthy',
-        'database': 'ok',
+        'database': {'primary': 'ok', 'replica': 'ok'},
         'cache': 'ok',
+        'redis_cluster': 'ok',
+        'milvus': 'ok',
+        'minio': 'ok',
     }
 
     try:
         with connection.cursor() as cursor:
             cursor.execute('SELECT 1')
-    except Exception:
-        health_status['database'] = 'error'
+    except Exception as e:
+        health_status['database']['primary'] = f'error: {str(e)}'
         health_status['status'] = 'unhealthy'
+
+    try:
+        replica_config = settings.DATABASES.get('replica')
+        if replica_config:
+            from django.db import connections
+            with connections['replica'].cursor() as cursor:
+                cursor.execute('SELECT 1')
+    except Exception as e:
+        health_status['database']['replica'] = f'error: {str(e)}'
+        health_status['status'] = 'degraded'
 
     try:
         cache.set('health_check', 'ok', 10)
         if cache.get('health_check') != 'ok':
             raise Exception('Cache not working')
-    except Exception:
-        health_status['cache'] = 'error'
+    except Exception as e:
+        health_status['cache'] = f'error: {str(e)}'
         health_status['status'] = 'unhealthy'
 
-    status_code = 200 if health_status['status'] == 'healthy' else 503
+    try:
+        redis_host = os.getenv('REDIS_HOST', 'localhost')
+        redis_port = int(os.getenv('REDIS_PORT', 6379))
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(3)
+        result = sock.connect_ex((redis_host, redis_port))
+        sock.close()
+        if result != 0:
+            raise Exception(f'Port {redis_port} not reachable')
+    except Exception as e:
+        health_status['redis_cluster'] = f'error: {str(e)}'
+        health_status['status'] = 'degraded'
+
+    try:
+        milvus_host = os.getenv('MILVUS_HOST', 'localhost')
+        milvus_port = int(os.getenv('MILVUS_PORT', 19530))
+        req = urllib.request.Request(f'http://{milvus_host}:{milvus_port}/healthz', method='GET')
+        with urllib.request.urlopen(req, timeout=5) as response:
+            if response.status != 200:
+                raise Exception(f'Milvus returned status {response.status}')
+    except Exception as e:
+        health_status['milvus'] = f'error: {str(e)}'
+        health_status['status'] = 'degraded'
+
+    try:
+        minio_endpoint = os.getenv('MINIO_ENDPOINT', 'localhost:9000')
+        req = urllib.request.Request(f'http://{minio_endpoint}/minio/health/live', method='GET')
+        with urllib.request.urlopen(req, timeout=5) as response:
+            if response.status != 200:
+                raise Exception(f'MinIO returned status {response.status}')
+    except Exception as e:
+        health_status['minio'] = f'error: {str(e)}'
+        health_status['status'] = 'degraded'
+
+    status_code = 200 if health_status['status'] == 'healthy' else 503 if health_status['status'] == 'unhealthy' else 200
     return JsonResponse(health_status, status=status_code)
 
-
-_services_cache = {'data': None, 'expires': 0}
-_services_cache_lock = threading.Lock()
 
 def system_services_status(request):
     """
@@ -94,7 +144,7 @@ def system_services_status(request):
 
     with _services_cache_lock:
         if _services_cache['data'] and _services_cache['expires'] > time.time():
-            cache.set(cache_key, _services_cache['data'], 10)
+            cache.set(cache_key, _services_cache['data'], 30)
             return JsonResponse(_services_cache['data'])
 
     services = []
@@ -104,6 +154,7 @@ def system_services_status(request):
     service_name_to_id = {}
     display_name_to_db_name = {
         'Django Server': 'django_server',
+        'PostgreSQL Service': 'postgresql_database',
         'PostgreSQL Database': 'postgresql_database',
         'Redis Cache': 'redis_cache',
         'Redis Queue': 'redis_cache',
@@ -137,12 +188,24 @@ def system_services_status(request):
     add_service('Django Server', 'running', f'服务正常，当前时间: {timezone.now().strftime("%Y-%m-%d %H:%M:%S")}')
 
     try:
-        with connection.cursor() as cursor:
-            cursor.execute('SELECT 1')
-        add_service('PostgreSQL Database', 'running', '数据库连接正常')
+        from apps.monitor.restart_manager import PostgresGuardian
+        pg_status = PostgresGuardian.check_postgres_status()
+        if pg_status['is_running'] is True:
+            add_service('PostgreSQL Database', 'running', pg_status.get('message', '数据库服务运行正常'))
+        elif pg_status['is_running'] is False and pg_status['can_restart']:
+            add_service('PostgreSQL Database', 'stopped', f'服务已停止: {pg_status["message"]}')
+            overall_status = 'degraded'
+        else:
+            add_service('PostgreSQL Database', 'error', pg_status.get('message', '状态未知'))
+            overall_status = 'degraded'
     except Exception as e:
-        add_service('PostgreSQL Database', 'error', f'连接失败: {str(e)}')
-        overall_status = 'unhealthy'
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT 1')
+            add_service('PostgreSQL Database', 'running', '数据库连接正常')
+        except Exception as e2:
+            add_service('PostgreSQL Database', 'error', f'连接失败: {str(e2)}')
+            overall_status = 'unhealthy'
 
     try:
         cache.set('health_check', 'ok', 10)
@@ -171,12 +234,26 @@ def system_services_status(request):
     celery_thread.start()
 
     def check_chroma_async():
-        try:
-            from services.vector import document_vector_store
-            count = document_vector_store.get_count()
-            add_service('Chroma VectorDB', 'running', f'向量库正常 ({count} 条数据)')
-        except Exception as e:
-            add_service('Chroma VectorDB', 'error', f'连接失败: {str(e)}')
+        now = time.time()
+        skip = False
+        with _optional_services_down_lock:
+            if 'chroma' in _optional_services_down and now - _optional_services_down['chroma'] < 120:
+                skip = True
+        if not skip:
+            try:
+                from services.vector import document_vector_store
+                count = document_vector_store.get_count()
+                add_service('Chroma VectorDB', 'running', f'向量库正常 ({count} 条数据)')
+                with _optional_services_down_lock:
+                    _optional_services_down.pop('chroma', None)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug(f'Chroma检查失败: {e}')
+                add_service('Chroma VectorDB', 'stopped', 'Chroma未运行（可选服务）')
+                with _optional_services_down_lock:
+                    _optional_services_down['chroma'] = now
+        else:
+            add_service('Chroma VectorDB', 'stopped', 'Chroma未运行（可选服务）')
 
     chroma_thread = threading.Thread(target=check_chroma_async)
     chroma_thread.daemon = True
@@ -184,50 +261,79 @@ def system_services_status(request):
 
     def check_optional_services():
         import urllib.request
-        import ssl
         import logging
 
         logger = logging.getLogger(__name__)
-
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        now = time.time()
 
         try:
-            req = urllib.request.Request('http://localhost:9000/minio/health/live', method='GET')
-            with urllib.request.urlopen(req, timeout=2, context=ctx) as response:
-                if response.status == 200:
-                    add_service('MinIO Storage', 'running', '对象存储服务正常')
-                else:
-                    raise Exception(f'Status: {response.status}')
+            skip = False
+            with _optional_services_down_lock:
+                if 'minio' in _optional_services_down and now - _optional_services_down['minio'] < 120:
+                    skip = True
+            if not skip:
+                req = urllib.request.Request('http://localhost:9000/minio/health/live', method='GET')
+                with urllib.request.urlopen(req, timeout=2) as response:
+                    if response.status == 200:
+                        add_service('MinIO Storage', 'running', '对象存储服务正常')
+                        with _optional_services_down_lock:
+                            _optional_services_down.pop('minio', None)
+                    else:
+                        raise Exception(f'Status: {response.status}')
+            else:
+                add_service('MinIO Storage', 'stopped', 'MinIO未运行（可选服务）')
         except Exception as e:
-            logger.warning(f'MinIO检查失败: {e}')
+            logger.debug(f'MinIO检查失败: {e}')
             add_service('MinIO Storage', 'stopped', 'MinIO未运行（可选服务）')
+            with _optional_services_down_lock:
+                _optional_services_down['minio'] = now
 
         try:
-            req = urllib.request.Request('http://localhost:11434/api/tags', method='GET')
-            with urllib.request.urlopen(req, timeout=2) as response:
-                if response.status == 200:
-                    import json
-                    data = json.loads(response.read().decode())
-                    models = data.get('models', [])
-                    add_service('Ollama AI', 'running', f'Ollama服务正常 ({len(models)} 个模型)')
-                else:
-                    raise Exception(f'Status: {response.status}')
+            skip = False
+            with _optional_services_down_lock:
+                if 'ollama' in _optional_services_down and now - _optional_services_down['ollama'] < 120:
+                    skip = True
+            if not skip:
+                req = urllib.request.Request('http://localhost:11434/api/tags', method='GET')
+                with urllib.request.urlopen(req, timeout=2) as response:
+                    if response.status == 200:
+                        import json
+                        data = json.loads(response.read().decode())
+                        models = data.get('models', [])
+                        add_service('Ollama AI', 'running', f'Ollama服务正常 ({len(models)} 个模型)')
+                        with _optional_services_down_lock:
+                            _optional_services_down.pop('ollama', None)
+                    else:
+                        raise Exception(f'Status: {response.status}')
+            else:
+                add_service('Ollama AI', 'stopped', 'Ollama未运行（AI功能不可用）')
         except Exception as e:
-            logger.warning(f'Ollama检查失败: {e}')
+            logger.debug(f'Ollama检查失败: {e}')
             add_service('Ollama AI', 'stopped', 'Ollama未运行（AI功能不可用）')
+            with _optional_services_down_lock:
+                _optional_services_down['ollama'] = now
 
         try:
-            req = urllib.request.Request('http://localhost:9091/healthz', method='GET')
-            with urllib.request.urlopen(req, timeout=5, context=ctx) as response:
-                if response.status == 200:
-                    add_service('Milvus VectorDB', 'running', '向量数据库服务正常')
-                else:
-                    raise Exception(f'Status: {response.status}')
+            skip = False
+            with _optional_services_down_lock:
+                if 'milvus' in _optional_services_down and now - _optional_services_down['milvus'] < 120:
+                    skip = True
+            if not skip:
+                req = urllib.request.Request('http://localhost:9091/healthz', method='GET')
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    if response.status == 200:
+                        add_service('Milvus VectorDB', 'running', '向量数据库服务正常')
+                        with _optional_services_down_lock:
+                            _optional_services_down.pop('milvus', None)
+                    else:
+                        raise Exception(f'Status: {response.status}')
+            else:
+                add_service('Milvus VectorDB', 'stopped', 'Milvus未运行（可选服务）')
         except Exception as e:
-            logger.warning(f'Milvus检查失败: {e}')
+            logger.debug(f'Milvus检查失败: {e}')
             add_service('Milvus VectorDB', 'stopped', 'Milvus未运行（可选服务）')
+            with _optional_services_down_lock:
+                _optional_services_down['milvus'] = now
 
     optional_thread = threading.Thread(target=check_optional_services)
     optional_thread.daemon = True
@@ -252,9 +358,9 @@ def system_services_status(request):
 
     with _services_cache_lock:
         _services_cache['data'] = result
-        _services_cache['expires'] = time.time() + 10
+        _services_cache['expires'] = time.time() + 30
 
-    cache.set(cache_key, result, 10)
+    cache.set(cache_key, result, 30)
 
     status_code = 200 if overall_status in ['healthy', 'degraded'] else 503
 
@@ -265,6 +371,7 @@ urlpatterns = [
     path('', api_root, name='api_root'),
     path('health/', health_check, name='health_check'),
     path('api/v1/system/services/', system_services_status, name='system_services'),
+    path('api/v1/system/health/', health_check, name='system_health'),
     path('admin/', admin.site.urls),
     path('api/v1/constants/', ConstantsAPIView.as_view(), name='constants'),
     path('api/v1/constants/<str:constant_type>/', ConstantsDetailAPIView.as_view(), name='constants_detail'),
@@ -277,7 +384,6 @@ urlpatterns = [
     path('api/v1/enterprise/', include('apps.enterprise.urls')),
     path('api/v1/openclaw/', include('apps.openclaw.urls')),
     path('api/v1/vectorlib/', include('apps.vectorlib.urls')),
-    path('api/v1/scheduler/', include('apps.scheduler.urls')),
     path('api/v1/monitor/', include('apps.monitor.urls')),
     path('api/v1/progress/', include('core.progress_urls')),
     path('api/v1/knowledge/', ProjectKnowledgeView.as_view(), name='knowledge'),

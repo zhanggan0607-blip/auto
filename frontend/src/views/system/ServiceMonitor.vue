@@ -115,7 +115,6 @@
                     <el-icon><View /></el-icon> 健康检查
                   </el-dropdown-item>
                   <el-dropdown-item
-                    v-if="service.auto_restart_enabled"
                     @click.stop="handleRestart(service)"
                   >
                     <el-icon><Refresh /></el-icon> 重启服务
@@ -131,7 +130,7 @@
           <div class="service-card-body">
             <div class="service-name">{{ service.display_name }}</div>
             <div class="service-status">
-              <el-tag :type="getStatusType(service.status)" size="small">
+              <el-tag :type="getStatusType('service_health', 'service_health', service.status)" size="small">
                 {{ service.status_display }}
               </el-tag>
             </div>
@@ -162,7 +161,7 @@
           <div class="service-card-footer">
             <div class="last-check" v-if="service.last_health_check">
               <el-icon><Timer /></el-icon>
-              {{ formatTime(service.last_health_check) }}
+              {{ formatDateTime(service.last_health_check) }}
             </div>
             <div class="restart-info" v-if="service.restart_attempts_today > 0">
               今日重启: {{ service.restart_attempts_today }}
@@ -206,7 +205,7 @@
           </el-radio-group>
         </el-form-item>
         <el-form-item label="检查URL" prop="health_check_url" v-if="addForm.health_check_type === 'http'">
-          <el-input v-model="addForm.health_check_url" placeholder="如: http://localhost:5432" />
+          <el-input v-model="addForm.health_check_url" placeholder="如: http://localhost:8100/health/" />
         </el-form-item>
         <el-form-item label="检查端口" prop="health_check_port" v-if="addForm.health_check_type === 'tcp'">
           <el-input-number v-model="addForm.health_check_port" :min="1" :max="65535" />
@@ -229,14 +228,14 @@
         <el-descriptions :column="2" border>
           <el-descriptions-item label="服务名称">{{ currentService.service_name }}</el-descriptions-item>
           <el-descriptions-item label="当前状态">
-            <el-tag :type="getStatusType(currentService.status)">{{ currentService.status_display }}</el-tag>
+            <el-tag :type="getStatusType('service_health', 'service_health', currentService.status)">{{ currentService.status_display }}</el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="服务类别">{{ getCategoryLabel(currentService.category) }}</el-descriptions-item>
           <el-descriptions-item label="是否关键">{{ currentService.is_critical ? '是' : '否' }}</el-descriptions-item>
           <el-descriptions-item label="连续失败次数">{{ currentService.consecutive_failures }}</el-descriptions-item>
           <el-descriptions-item label="今日重启次数">{{ currentService.restart_attempts_today }}</el-descriptions-item>
           <el-descriptions-item label="最后检查时间" :span="2">
-            {{ formatTime(currentService.last_health_check) }}
+            {{ formatDateTime(currentService.last_health_check) }}
           </el-descriptions-item>
           <el-descriptions-item v-if="currentService.worker_count !== undefined" label="Worker数量">
             {{ currentService.worker_count }}
@@ -270,6 +269,8 @@ import {
 } from '@/api/monitor'
 import ServiceHealthChart from './components/ServiceHealthChart.vue'
 import ServiceActionLogList from './components/ServiceActionLogList.vue'
+import { formatDateTime } from '@/utils/date'
+import { getStatusType } from '@/store/constants'
 
 const loading = ref(false)
 const recovering = ref(false)
@@ -351,34 +352,16 @@ const filteredServices = computed(() => {
   return services
 })
 
-const getStatusType = (status) => {
-  const typeMap = {
-    'healthy': 'success',
-    'degraded': 'warning',
-    'unhealthy': 'danger',
-    'restarting': 'warning',
-    'offline': 'info',
-    'unknown': 'info'
-  }
-  return typeMap[status] || 'info'
-}
-
 const getCategoryLabel = (category) => {
   const cat = categories.value.find(c => c.value === category)
   return cat?.label || category
-}
-
-const formatTime = (time) => {
-  if (!time) return '从未'
-  const date = new Date(time)
-  return date.toLocaleString('zh-CN')
 }
 
 const fetchDashboard = async () => {
   try {
     loading.value = true
     const res = await getMonitorDashboard()
-    dashboardData.value = res
+    dashboardData.value = res.data || null
   } catch (error) {
     console.error('获取监控数据失败:', error)
     ElMessage.error('获取监控数据失败')
@@ -390,7 +373,7 @@ const fetchDashboard = async () => {
 const fetchCategories = async () => {
   try {
     const res = await getServiceCategories()
-    categories.value = res
+    categories.value = res.data || []
   } catch (error) {
     console.error('获取服务类别失败:', error)
   }
@@ -442,7 +425,8 @@ const handleRestart = async (service) => {
     fetchDashboard()
   } catch (error) {
     if (error !== 'cancel') {
-      ElMessage.error('重启失败: ' + (error.message || '未知错误'))
+      const msg = error?.response?.data?.message || error?.message || '未知错误'
+      ElMessage.error(msg)
     }
   }
 }
@@ -543,23 +527,23 @@ onUnmounted(() => {
   justify-content: center;
 
   &.healthy {
-    background: rgba(103, 194, 58, 0.1);
-    color: #67c23a;
+    background: rgba(22, 163, 74, 0.1);
+    color: #16A34A;
   }
 
   &.degraded {
-    background: rgba(230, 162, 60, 0.1);
-    color: #e6a23c;
+    background: rgba(234, 88, 12, 0.1);
+    color: #EA580C;
   }
 
   &.unhealthy {
-    background: rgba(245, 108, 108, 0.1);
-    color: #f56c6c;
+    background: rgba(220, 38, 38, 0.1);
+    color: #DC2626;
   }
 
   &.alerts {
     background: rgba(144, 147, 153, 0.1);
-    color: #909399;
+    color: #64748B;
   }
 }
 
@@ -575,7 +559,7 @@ onUnmounted(() => {
 
 .stat-label {
   font-size: 14px;
-  color: #909399;
+  color: #64748B;
   margin-top: 4px;
 }
 
@@ -610,7 +594,7 @@ onUnmounted(() => {
 
 .service-count {
   font-size: 14px;
-  color: #909399;
+  color: #64748B;
 }
 
 .services-grid {
@@ -621,7 +605,7 @@ onUnmounted(() => {
 
 .service-card {
   background: #fff;
-  border: 1px solid #ebeef5;
+  border: 1px solid #E2E8F0;
   border-radius: 12px;
   padding: 16px;
   cursor: pointer;
@@ -635,24 +619,24 @@ onUnmounted(() => {
   }
 
   &.service-healthy {
-    border-left: 4px solid #67c23a;
+    border-left: 4px solid #16A34A;
   }
 
   &.service-degraded {
-    border-left: 4px solid #e6a23c;
+    border-left: 4px solid #EA580C;
   }
 
   &.service-unhealthy {
-    border-left: 4px solid #f56c6c;
-    background: rgba(245, 108, 108, 0.02);
+    border-left: 4px solid #DC2626;
+    background: rgba(220, 38, 38, 0.02);
   }
 
   &.service-offline {
-    border-left: 4px solid #909399;
+    border-left: 4px solid #64748B;
   }
 
   &.service-restarting {
-    border-left: 4px solid #409eff;
+    border-left: 4px solid #3B82F6;
   }
 }
 
@@ -676,7 +660,7 @@ onUnmounted(() => {
   font-size: 16px;
   font-weight: 600;
   margin-bottom: 8px;
-  color: #303133;
+  color: #1E293B;
 }
 
 .service-metrics {
@@ -693,13 +677,13 @@ onUnmounted(() => {
 
 .metric-label {
   font-size: 12px;
-  color: #909399;
+  color: #64748B;
 }
 
 .metric-value {
   font-size: 12px;
   font-weight: 500;
-  color: #606266;
+  color: #334155;
 }
 
 .service-card-footer {
@@ -707,7 +691,7 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   font-size: 12px;
-  color: #909399;
+  color: #64748B;
 }
 
 .last-check {
@@ -720,8 +704,8 @@ onUnmounted(() => {
   position: absolute;
   top: 8px;
   right: 8px;
-  background: rgba(245, 108, 108, 0.1);
-  color: #f56c6c;
+  background: rgba(220, 38, 38, 0.1);
+  color: #DC2626;
   font-size: 12px;
   padding: 2px 8px;
   border-radius: 4px;
@@ -739,7 +723,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  color: #409eff;
+  color: #3B82F6;
   font-size: 14px;
 }
 

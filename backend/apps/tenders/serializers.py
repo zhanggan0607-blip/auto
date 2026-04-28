@@ -63,10 +63,14 @@ class TenderProjectListSerializer(serializers.ModelSerializer):
         ]
 
     def get_files_count(self, obj):
-        """
-        获取文件数量
-        """
-        return obj.files.count()
+        if hasattr(obj, '_prefetched_objects_cache') and 'files' in obj._prefetched_objects_cache:
+            return len(obj._prefetched_objects_cache['files'])
+        if hasattr(obj, 'files_count'):
+            return obj.files_count
+        try:
+            return obj.files.count()
+        except Exception:
+            return 0
 
 
 class TenderProjectDetailSerializer(serializers.ModelSerializer):

@@ -7,14 +7,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+WEAK_PASSWORDS = {'minioadmin', 'admin', 'password', '123456', 'root'}
+
 
 def validate_sensitive_config():
     """
     验证敏感配置是否正确设置
 
     检查以下配置不能使用默认值：
-    - MINIO_ACCESS_KEY 不能为 'minioadmin'
-    - MINIO_SECRET_KEY 不能为 'minioadmin'
+    - MINIO_ACCESS_KEY 不能为弱密码
+    - MINIO_SECRET_KEY 不能为弱密码
     - ALIYUN_OCR_ACCESS_KEY_ID 必须设置
     - ALIYUN_OCR_ACCESS_KEY_SECRET 必须设置
     - OPENAI_API_KEY 必须设置（如果使用 OpenAI）
@@ -27,11 +29,18 @@ def validate_sensitive_config():
     minio_access_key = os.getenv('MINIO_ACCESS_KEY', '')
     minio_secret_key = os.getenv('MINIO_SECRET_KEY', '')
 
-    if minio_access_key == 'minioadmin' and not os.getenv('MINIO_ACCESS_KEY'):
-        errors.append('MINIO_ACCESS_KEY 使用了默认的 minioadmin，请修改为强密码')
+    if not minio_access_key:
+        errors.append('MINIO_ACCESS_KEY 环境变量必须设置')
+    elif minio_access_key in WEAK_PASSWORDS:
+        errors.append(f'MINIO_ACCESS_KEY 使用了弱密码 "{minio_access_key}"，请修改为强密码')
 
-    if minio_secret_key == 'minioadmin' and not os.getenv('MINIO_SECRET_KEY'):
-        errors.append('MINIO_SECRET_KEY 使用了默认的 minioadmin，请修改为强密码')
+    if not minio_secret_key:
+        errors.append('MINIO_SECRET_KEY 环境变量必须设置')
+    elif minio_secret_key in WEAK_PASSWORDS:
+        errors.append(f'MINIO_SECRET_KEY 使用了弱密码 "{minio_secret_key}"，请修改为强密码')
+
+    if minio_access_key == minio_secret_key and minio_access_key:
+        errors.append('MINIO_ACCESS_KEY 和 MINIO_SECRET_KEY 不能相同')
 
     aliyun_ocr_key_id = os.getenv('ALIYUN_OCR_ACCESS_KEY_ID', '')
     aliyun_ocr_key_secret = os.getenv('ALIYUN_OCR_ACCESS_KEY_SECRET', '')
@@ -48,12 +57,9 @@ def validate_sensitive_config():
     if embedding_model_type == 'openai' and not openai_api_key:
         errors.append('EMBEDDING_MODEL_TYPE 设置为 openai，但 OPENAI_API_KEY 未设置')
 
-    llm_provider = os.getenv('OPENCLAW_LLM_PROVIDER', 'ollama')
-
-    if llm_provider not in ['ollama', 'local']:
-        from openclaw.config import ollama_config
-        if not ollama_config.get('api_key'):
-            logger.warning('LLM Provider API Key 未设置')
+    django_secret_key = os.getenv('DJANGO_SECRET_KEY', '')
+    if django_secret_key in ('', 'your-secret-key-here', 'change-me'):
+        logger.warning('DJANGO_SECRET_KEY 未通过环境变量设置，使用配置文件默认值')
 
     return len(errors) == 0, errors
 
@@ -79,11 +85,11 @@ def get_minio_config():
     if not minio_config['SECRET_KEY']:
         raise ValueError('MINIO_SECRET_KEY 环境变量必须设置')
 
-    if minio_config['ACCESS_KEY'] == 'minioadmin':
-        raise ValueError('MINIO_ACCESS_KEY 不能使用默认的 minioadmin，请修改为强密码')
+    if minio_config['ACCESS_KEY'] in WEAK_PASSWORDS:
+        raise ValueError(f'MINIO_ACCESS_KEY 不能使用弱密码 "{minio_config["ACCESS_KEY"]}"，请修改为强密码')
 
-    if minio_config['SECRET_KEY'] == 'minioadmin':
-        raise ValueError('MINIO_SECRET_KEY 不能使用默认的 minioadmin，请修改为强密码')
+    if minio_config['SECRET_KEY'] in WEAK_PASSWORDS:
+        raise ValueError(f'MINIO_SECRET_KEY 不能使用弱密码 "{minio_config["SECRET_KEY"]}"，请修改为强密码')
 
     return minio_config
 

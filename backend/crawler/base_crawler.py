@@ -1,5 +1,9 @@
 """
 爬虫模块 - 基础爬虫类（优化版）
+
+.. deprecated::
+    请使用 `common.crawler.common_crawler.CommonCrawler` 替代
+    此模块将在未来版本中移除
 """
 import os
 import time

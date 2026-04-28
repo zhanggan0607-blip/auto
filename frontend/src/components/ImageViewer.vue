@@ -560,7 +560,7 @@ defineExpose({
 }
 
 .thumbnail-item.active {
-  border-color: #409eff;
+  border-color: #3B82F6;
   opacity: 1;
 }
 

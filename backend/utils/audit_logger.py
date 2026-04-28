@@ -7,6 +7,7 @@ import logging
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from django.utils import timezone
+from utils.helpers import get_client_ip
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,10 @@ class AuditLogger:
         self._buffer = []
         self._buffer_size = 100
         self._async_save = True
+        self._flush_interval = 30
+        self._last_flush = datetime.now().timestamp()
+        import atexit
+        atexit.register(self._flush_buffer)
 
     def _filter_sensitive_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -208,7 +213,7 @@ class AuditLogger:
         if request:
             user_id = user_id or (request.user.id if hasattr(request, 'user') and request.user.is_authenticated else None)
             username = username or (request.user.username if hasattr(request, 'user') and request.user.is_authenticated else 'anonymous')
-            ip_address = ip_address or self._get_client_ip(request)
+            ip_address = ip_address or get_client_ip(request)
             user_agent = user_agent or request.META.get('HTTP_USER_AGENT', '')
             if request_data is None and request.method in ['POST', 'PUT', 'PATCH']:
                 try:
@@ -254,6 +259,8 @@ class AuditLogger:
 
         if len(self._buffer) >= self._buffer_size:
             self._flush_buffer()
+        elif datetime.now().timestamp() - self._last_flush >= self._flush_interval:
+            self._flush_buffer()
 
     def _flush_buffer(self):
         """刷新缓冲区，将日志写入存储"""
@@ -263,6 +270,7 @@ class AuditLogger:
         try:
             self._save_to_database(self._buffer)
             self._buffer = []
+            self._last_flush = datetime.now().timestamp()
         except Exception as e:
             logger.error(f"保存审计日志失败: {str(e)}")
 
@@ -274,7 +282,7 @@ class AuditLogger:
             log_entries: 日志条目列表
         """
         try:
-            from apps.core.models import AuditLog
+            from core.models import AuditLog
             models_to_create = []
             for entry in log_entries:
                 models_to_create.append(AuditLog(
@@ -298,13 +306,6 @@ class AuditLogger:
             logger.debug("AuditLog模型未定义，跳过数据库存储")
         except Exception as e:
             logger.error(f"数据库存储审计日志失败: {str(e)}")
-
-    def _get_client_ip(self, request) -> str:
-        """获取客户端IP"""
-        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        if x_forwarded_for:
-            return x_forwarded_for.split(',')[0].strip()
-        return request.META.get('REMOTE_ADDR', '')
 
     def log_login(self, request, status: str = 'success', error_message: str = None):
         """记录登录事件"""

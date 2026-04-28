@@ -29,7 +29,7 @@ class GovernmentTenderCollectorSkill(Skill):
             'properties': {
                 'source': {
                     'type': 'string',
-                    'description': '数据源：china_gov, shanghai_gov'
+                    'description': '数据源：china_gov, shanghai_gov, sh_construction'
                 },
                 'keywords': {
                     'type': 'array',
@@ -50,6 +50,11 @@ class GovernmentTenderCollectorSkill(Skill):
                     'type': 'integer',
                     'description': '每页数量',
                     'default': 20
+                },
+                'max_pages': {
+                    'type': 'integer',
+                    'description': '最大采集页数',
+                    'default': None
                 },
                 'start_date': {
                     'type': 'string',
@@ -103,32 +108,41 @@ class GovernmentTenderCollectorSkill(Skill):
         notice_types = kwargs.get('notice_types')
         page = kwargs.get('page', 1)
         page_size = kwargs.get('page_size', 20)
+        max_pages = kwargs.get('max_pages')
         start_date = kwargs.get('start_date')
         end_date = kwargs.get('end_date')
         
         try:
-            if source == 'china_gov':
-                results = await self._crawl_china_gov(
-                    keywords=keywords,
-                    notice_types=notice_types,
-                    page=page,
-                    page_size=page_size,
-                    start_date=start_date,
-                    end_date=end_date
-                )
-            elif source == 'shanghai_gov':
-                results = await self._crawl_shanghai_gov(
-                    keywords=keywords,
-                    notice_types=notice_types,
-                    page=page,
-                    page_size=page_size
-                )
-            else:
+            from crawler.crawl_source_registry import crawl_source_registry
+
+            crawler_class = crawl_source_registry.get_crawler_class(source)
+            if not crawler_class:
                 return SkillResult(
                     success=False,
                     error=f"Unknown source: {source}"
                 )
-            
+
+            crawler = crawler_class()
+            crawl_kwargs = {
+                'notice_types': notice_types,
+                'keywords': keywords,
+                'page': page,
+                'page_size': page_size,
+                'start_date': start_date,
+                'end_date': end_date,
+            }
+            if crawl_source_registry.supports_max_pages(source):
+                crawl_kwargs['max_pages'] = max_pages
+
+            result = await crawler.crawl(**crawl_kwargs)
+
+            if hasattr(result, 'data'):
+                results = result.data or []
+            elif isinstance(result, list):
+                results = result
+            else:
+                results = []
+
             return SkillResult(
                 success=True,
                 data=results,
@@ -145,65 +159,6 @@ class GovernmentTenderCollectorSkill(Skill):
                 success=False,
                 error=str(e)
             )
-    
-    async def _crawl_china_gov(
-        self,
-        keywords: List[str],
-        notice_types: List[str],
-        page: int,
-        page_size: int,
-        start_date: str,
-        end_date: str
-    ) -> List[Dict]:
-        """
-        采集中国政府采购网
-        """
-        from crawler.china_gov_crawler import ChinaGovCrawler
-        
-        crawler = ChinaGovCrawler()
-        
-        def sync_crawl():
-            return crawler.crawl(
-                notice_types=notice_types,
-                keywords=keywords,
-                page=page,
-                page_size=page_size,
-                start_date=start_date,
-                end_date=end_date
-            )
-        
-        loop = asyncio.get_event_loop()
-        results = await loop.run_in_executor(None, sync_crawl)
-        
-        return results
-    
-    async def _crawl_shanghai_gov(
-        self,
-        keywords: List[str],
-        notice_types: List[str],
-        page: int,
-        page_size: int
-    ) -> List[Dict]:
-        """
-        采集上海市政府采购网
-        """
-        from crawler.shanghai_gov_crawler_v2 import ShanghaiGovCrawler
-
-        crawler = ShanghaiGovCrawler()
-
-        result = await crawler.crawl(
-            notice_types=notice_types,
-            keywords=keywords,
-            page=page,
-            page_size=page_size
-        )
-
-        if hasattr(result, 'data'):
-            return result.data or []
-        elif isinstance(result, list):
-            return result
-        else:
-            return []
 
 
 class WebPageCollectorSkill(Skill):
@@ -298,17 +253,17 @@ class WebPageCollectorSkill(Skill):
         """
         使用Selenium获取网页
         """
-        from crawler.base_crawler import BaseCrawler, CrawlerConfig
-        
+        from common.crawler import CommonCrawler, CrawlerConfig
+
         config = CrawlerConfig(headless=True)
-        crawler = BaseCrawler(config)
-        
+        crawler = CommonCrawler(config)
+
         def sync_fetch():
             return crawler.get_page(url)
-        
-        loop = asyncio.get_event_loop()
+
+        loop = asyncio.get_running_loop()
         content = await loop.run_in_executor(None, sync_fetch)
-        
-        crawler.close_driver()
-        
+
+        crawler.close()
+
         return content or ''

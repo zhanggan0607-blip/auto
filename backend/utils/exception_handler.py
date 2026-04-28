@@ -16,7 +16,7 @@ class MyViewSet(viewsets.ModelViewSet):
     @api_exception_handler
     def my_action(self, request, pk=None):
         result = do_something()
-        return APIResponse.success(data=result)
+        return UnifiedResponse.success(data=result)
 
 # 错误记录
 from utils.exception_handler import catch_and_log
@@ -49,6 +49,7 @@ from rest_framework.exceptions import (
 )
 
 from utils.responses import UnifiedResponse
+from common.constants.error_codes import ErrorCode
 
 try:
     from utils.error_logger_service import error_logger
@@ -78,7 +79,7 @@ def api_exception_handler(func):
         @api_exception_handler
         def my_view(request):
             result = do_something()
-            return APIResponse.success(data=result)
+            return UnifiedResponse.success(data=result)
     """
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -105,7 +106,7 @@ def api_exception_handler_async(func):
         @api_exception_handler_async
         async def my_async_view(request):
             result = await do_something_async()
-            return APIResponse.success(data=result)
+            return UnifiedResponse.success(data=result)
     """
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
@@ -119,71 +120,88 @@ def api_exception_handler_async(func):
 def _handle_api_exception(e, func_name):
     """
     处理API异常并返回统一格式的响应
-    
+
     Args:
         e: 异常对象
         func_name: 函数名称
-        
+
     Returns:
-        APIResponse对象
+        UnifiedResponse对象
     """
     error_message = str(e)
+    error_code = None
     response_status = status.HTTP_400_BAD_REQUEST
-    
+
     if isinstance(e, DRFValidationError):
         error_message = _format_validation_error(e)
+        error_code = ErrorCode.INVALID_PARAMETER
         response_status = status.HTTP_400_BAD_REQUEST
         logger.warning(f"[{func_name}] 验证错误: {error_message}")
-        
+
     elif isinstance(e, DRFAuthenticationFailed):
         error_message = '认证失败'
+        error_code = ErrorCode.AUTH_TOKEN_INVALID
         response_status = status.HTTP_401_UNAUTHORIZED
         logger.warning(f"[{func_name}] 认证失败")
-        
+
     elif isinstance(e, (DRFPermissionDenied, DjangoPermissionDenied)):
         error_message = '无权限执行此操作'
+        error_code = ErrorCode.PERMISSION_DENIED
         response_status = status.HTTP_403_FORBIDDEN
         logger.warning(f"[{func_name}] 权限不足")
-        
+
     elif isinstance(e, DRFNotFound):
         error_message = '资源不存在'
+        error_code = ErrorCode.NOT_FOUND
         response_status = status.HTTP_404_NOT_FOUND
         logger.warning(f"[{func_name}] 资源不存在")
-        
+
     elif isinstance(e, APIException):
         if hasattr(e, 'detail') and isinstance(e.detail, dict):
             error_message = e.detail.get('message', str(e.detail))
         else:
             error_message = str(e.detail) if hasattr(e, 'detail') else str(e)
+        error_code = ErrorCode.OPERATION_FAILED
         response_status = e.status_code
         logger.warning(f"[{func_name}] API异常: {error_message}")
-        
+
     elif 'DoesNotExist' in type(e).__name__:
         model_name = _extract_model_name(e)
         error_message = f'{model_name}不存在' if model_name else '记录不存在'
+        error_code = ErrorCode.NOT_FOUND
         response_status = status.HTTP_404_NOT_FOUND
         logger.warning(f"[{func_name}] {error_message}")
-        
+
     elif 'MultipleObjectsReturned' in type(e).__name__:
         error_message = '找到多条匹配记录'
+        error_code = ErrorCode.OPERATION_FAILED
         response_status = status.HTTP_400_BAD_REQUEST
         logger.warning(f"[{func_name}] {error_message}")
-        
+
     elif 'IntegrityError' in type(e).__name__:
         error_message = '数据完整性错误，可能存在重复数据'
+        error_code = ErrorCode.ALREADY_EXISTS
         response_status = status.HTTP_409_CONFLICT
         logger.error(f"[{func_name}] 数据完整性错误: {str(e)}")
-        
+
     elif 'ConnectionError' in type(e).__name__ or 'Timeout' in type(e).__name__:
         error_message = '网络连接失败，请稍后重试'
+        error_code = ErrorCode.SERVICE_UNAVAILABLE
         response_status = status.HTTP_503_SERVICE_UNAVAILABLE
         logger.error(f"[{func_name}] 网络错误: {str(e)}")
-        
+
     else:
         logger.error(f"[{func_name}] 未处理的异常: {type(e).__name__}: {str(e)}", exc_info=True)
         error_message = f'操作失败: {str(e)}' if str(e) else '操作失败'
+        error_code = ErrorCode.INTERNAL_ERROR
         response_status = status.HTTP_500_INTERNAL_SERVER_ERROR
-    
+
+    if error_code:
+        return UnifiedResponse.error(
+            message=error_message,
+            error_code=error_code.value[0],
+            status_code=response_status
+        )
     return UnifiedResponse.error(message=error_message, status_code=response_status)
 
 
@@ -398,7 +416,7 @@ class ExceptionHandlerContext:
     Example:
         with ExceptionHandlerContext("my_function") as ctx:
             result = do_something()
-            return APIResponse.success(data=result)
+            return UnifiedResponse.success(data=result)
         
         if ctx.exception:
             return ctx.get_response()

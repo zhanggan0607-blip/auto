@@ -1,6 +1,7 @@
 """
 投标文档向量库 - 视图
 """
+import asyncio
 import logging
 import os
 from pathlib import Path
@@ -14,9 +15,9 @@ from django.db.models import Q, Count
 from django.utils import timezone
 from django.conf import settings
 
-from utils.responses import APIResponse
+from utils.responses import UnifiedResponse
 from .models import BidDocumentLibrary, DocumentSearchLog, AISearchTask
-from core.viewsets import APIResponseMixin
+from common.views.base import APIResponseMixin
 from .serializers import (
     BidDocumentLibrarySerializer, BidDocumentLibraryListSerializer,
     BidDocumentLibraryCreateSerializer, DocumentSearchSerializer,
@@ -189,7 +190,7 @@ class BidDocumentLibraryViewSet(APIResponseMixin, viewsets.ModelViewSet):
 
         check_result = check_user_input(query, getattr(request.user, 'id', None))
         if check_result.risk_level == ContentRiskLevel.BLOCKED:
-            return APIResponse.error(
+            return UnifiedResponse.error(
                 message=f'搜索内容包含敏感信息: {check_result.risk_description}',
                 status_code=status.HTTP_400_BAD_REQUEST
             )
@@ -239,7 +240,7 @@ class BidDocumentLibraryViewSet(APIResponseMixin, viewsets.ModelViewSet):
             user=request.user
         )
 
-        return APIResponse.success(data={
+        return UnifiedResponse.success(data={
             'query': query,
             'total': len(formatted_results),
             'results': formatted_results
@@ -280,7 +281,7 @@ class BidDocumentLibraryViewSet(APIResponseMixin, viewsets.ModelViewSet):
         for keyword in keywords:
             check_result = check_user_input(keyword, getattr(request.user, 'id', None))
             if check_result.risk_level == ContentRiskLevel.BLOCKED:
-                return APIResponse.error(
+                return UnifiedResponse.error(
                     message=f'搜索关键词包含敏感信息: {check_result.risk_description}',
                     status_code=status.HTTP_400_BAD_REQUEST
                 )
@@ -391,7 +392,7 @@ class BidDocumentLibraryViewSet(APIResponseMixin, viewsets.ModelViewSet):
             user=request.user
         )
 
-        return APIResponse.success(data={
+        return UnifiedResponse.success(data={
             'keywords': keywords,
             'keyword_operator': keyword_operator,
             'doc_types': doc_types,
@@ -432,7 +433,7 @@ class BidDocumentLibraryViewSet(APIResponseMixin, viewsets.ModelViewSet):
         """
         doc = self.get_object()
         doc.increment_view_count()
-        return APIResponse.success()
+        return UnifiedResponse.success()
 
     @action(detail=True, methods=['post'])
     def increment_use(self, request, pk=None):
@@ -441,7 +442,7 @@ class BidDocumentLibraryViewSet(APIResponseMixin, viewsets.ModelViewSet):
         """
         doc = self.get_object()
         doc.increment_use_count()
-        return APIResponse.success()
+        return UnifiedResponse.success()
 
     @action(detail=False, methods=['get'])
     def statistics(self, request):
@@ -462,7 +463,7 @@ class BidDocumentLibraryViewSet(APIResponseMixin, viewsets.ModelViewSet):
             if count > 0:
                 doc_type_stats[choice[1]] = count
         
-        return APIResponse.success(data={
+        return UnifiedResponse.success(data={
             'total_count': total_count,
             'indexed_count': indexed_count,
             'vector_count': vector_count,
@@ -481,7 +482,7 @@ class BidDocumentLibraryViewSet(APIResponseMixin, viewsets.ModelViewSet):
         if not (request.user.is_staff or 
                 getattr(request.user, 'is_admin', lambda: False)() or
                 getattr(instance, 'created_by', None) == request.user):
-            return APIResponse.error(
+            return UnifiedResponse.error(
                 message='无权限删除此文档',
                 status_code=status.HTTP_403_FORBIDDEN
             )
@@ -518,7 +519,7 @@ class BidDocumentLibraryViewSet(APIResponseMixin, viewsets.ModelViewSet):
         auto_vectorize = serializer.validated_data.get('auto_vectorize', True)
         
         if not files:
-            return APIResponse.error(message='请选择要上传的文件', status_code=status.HTTP_400_BAD_REQUEST)
+            return UnifiedResponse.error(message='请选择要上传的文件', status_code=status.HTTP_400_BAD_REQUEST)
         
         result = {
             'total_files': len(files),
@@ -605,7 +606,7 @@ class BidDocumentLibraryViewSet(APIResponseMixin, viewsets.ModelViewSet):
                 })
                 logger.error(f"上传文件失败 {file_obj.name}: {str(e)}")
         
-        return APIResponse.success(
+        return UnifiedResponse.success(
             data=result,
             message=f"批量上传完成: 成功{result['success_count']}个, 跳过{result['skipped_count']}个, 失败{result['failed_count']}个"
         )
@@ -683,11 +684,11 @@ class AISearchTaskViewSet(APIResponseMixin, viewsets.ModelViewSet):
             self.perform_create(serializer)
         except Exception as e:
             logger.error(f"创建AI搜索任务失败: {str(e)}")
-            return APIResponse.error(message=f'创建任务失败: {str(e)}')
+            return UnifiedResponse.error(message=f'创建任务失败: {str(e)}')
 
         instance = serializer.instance
         response_serializer = AISearchTaskSerializer(instance)
-        return APIResponse.success(
+        return UnifiedResponse.success(
             data=response_serializer.data,
             message='AI搜索任务已创建，正在执行中...',
             status_code=status.HTTP_201_CREATED
@@ -862,25 +863,14 @@ class AISearchTaskViewSet(APIResponseMixin, viewsets.ModelViewSet):
         document_types = document_types or []
         industries = industries or []
 
-        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(
-                    asyncio.run,
-                    self._search_internet_async(keywords, document_types, industries)
-                )
-                return future.result()
-        else:
             return loop.run_until_complete(
                 self._search_internet_async(keywords, document_types, industries)
             )
+        finally:
+            loop.close()
 
     @action(detail=True, methods=['post'])
     def retry(self, request, pk=None):
@@ -889,7 +879,7 @@ class AISearchTaskViewSet(APIResponseMixin, viewsets.ModelViewSet):
         """
         task = self.get_object()
         if task.status != 'failed':
-            return APIResponse.error(message='只能重试失败的任务')
+            return UnifiedResponse.error(message='只能重试失败的任务')
         
         task.status = 'pending'
         task.error_message = ''
@@ -897,4 +887,4 @@ class AISearchTaskViewSet(APIResponseMixin, viewsets.ModelViewSet):
         
         self._execute_ai_search(task)
         
-        return APIResponse.success(data=AISearchTaskSerializer(task).data)
+        return UnifiedResponse.success(data=AISearchTaskSerializer(task).data)

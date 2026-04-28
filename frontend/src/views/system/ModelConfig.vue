@@ -92,7 +92,7 @@
             </el-table-column>
             <el-table-column prop="modified_at" label="更新时间" width="180">
               <template #default="{ row }">
-                {{ formatDate(row.modified_at) }}
+                {{ formatDateTime(row.modified_at) }}
               </template>
             </el-table-column>
             <el-table-column label="操作" width="100">
@@ -176,6 +176,9 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Sort } from '@element-plus/icons-vue'
+import { modelApi } from '@/api/model'
+import { parseListResponse } from '@/utils/response-parser'
+import { formatDateTime } from '@/utils/date'
 
 const refreshing = ref(false)
 const checkingOllama = ref(false)
@@ -195,6 +198,8 @@ const ollamaConfig = reactive({
   base_url: 'http://localhost:11434',
   default_model: ''
 })
+
+const ollamaProviderId = ref(null)
 
 const getAgentTypeText = (type) => {
   const typeMap = {
@@ -233,11 +238,6 @@ const formatModelSize = (name) => {
   return name
 }
 
-const formatDate = (dateStr) => {
-  if (!dateStr) return '-'
-  return new Date(dateStr).toLocaleString('zh-CN')
-}
-
 const toggleSort = () => {
   sortAscending.value = !sortAscending.value
 }
@@ -255,15 +255,8 @@ const sortedOllamaModels = computed(() => {
 const fetchModels = async () => {
   try {
     const res = await modelApi.listModels()
-    if (Array.isArray(res.data)) {
-      allModels.value = res.data
-    } else if (Array.isArray(res.data?.data)) {
-      allModels.value = res.data.data
-    } else if (Array.isArray(res.data?.results)) {
-      allModels.value = res.data.results
-    } else {
-      allModels.value = []
-    }
+    const { list: models } = parseListResponse(res)
+    allModels.value = models
   } catch (error) {
     console.error('获取模型列表失败:', error)
   }
@@ -272,15 +265,8 @@ const fetchModels = async () => {
 const fetchAgentConfigs = async () => {
   try {
     const res = await modelApi.getAgentConfigs()
-    if (Array.isArray(res.data)) {
-      agentConfigs.value = res.data
-    } else if (Array.isArray(res.data?.data)) {
-      agentConfigs.value = res.data.data
-    } else if (Array.isArray(res.data?.results)) {
-      agentConfigs.value = res.data.results
-    } else {
-      agentConfigs.value = []
-    }
+    const { list: configs } = parseListResponse(res)
+    agentConfigs.value = configs
   } catch (error) {
     console.error('获取Agent配置失败:', error)
     agentConfigs.value = []
@@ -292,10 +278,17 @@ const checkOllamaStatus = async (url = null) => {
   try {
     const targetUrl = url || ollamaConfig.base_url
     const res = await modelApi.getOllamaModels(targetUrl)
-    ollamaModels.value = res.data.models || []
-    ollamaStatus.connected = true
-    ollamaStatus.version = res.data.version || ''
-    ElMessage.success(`投标精灵连接成功，发现 ${ollamaModels.value.length} 个模型`)
+    const connected = res.data?.connected !== false
+    if (connected) {
+      ollamaModels.value = res.data.models || []
+      ollamaStatus.connected = true
+      ollamaStatus.version = res.data.version || ''
+      ElMessage.success(`投标精灵连接成功，发现 ${ollamaModels.value.length} 个模型`)
+    } else {
+      ollamaStatus.connected = false
+      ollamaModels.value = []
+      ElMessage.warning('投标精灵服务未启动，请确保投标精灵已启动')
+    }
   } catch (error) {
     ollamaStatus.connected = false
     ollamaModels.value = []
@@ -310,10 +303,24 @@ const fetchData = async () => {
   try {
     await Promise.all([
       fetchModels(),
-      fetchAgentConfigs()
+      fetchAgentConfigs(),
+      fetchOllamaProviderId()
     ])
   } finally {
     refreshing.value = false
+  }
+}
+
+const fetchOllamaProviderId = async () => {
+  try {
+    const res = await modelApi.listProviders()
+    const data = Array.isArray(res.data) ? res.data : (res.data?.data || [])
+    const ollamaProvider = data.find(p => p.provider_type === 'ollama' || p.type === 'ollama')
+    if (ollamaProvider) {
+      ollamaProviderId.value = ollamaProvider.id
+    }
+  } catch (error) {
+    console.error('获取Ollama提供商ID失败:', error)
   }
 }
 
@@ -337,10 +344,15 @@ const saveAgentConfigs = async () => {
 
 const testModel = async (modelName) => {
   try {
-    const res = await modelApi.testConnection(1, modelName)
-    ElMessage.success(`测试成功: ${res.data.response || '连接正常'}`)
+    const providerId = ollamaProviderId.value || 1
+    const res = await modelApi.testConnection(providerId, modelName)
+    if (res.success === false) {
+      ElMessage.error(res.message || '测试失败')
+      return
+    }
+    ElMessage.success(`测试成功: ${res.data?.response || '连接正常'}`)
   } catch (error) {
-    ElMessage.error('测试失败')
+    ElMessage.error(error.response?.data?.message || '测试失败')
   }
 }
 

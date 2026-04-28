@@ -4,14 +4,14 @@
       <el-table-column prop="action_type_display" label="操作类型" width="120" />
       <el-table-column prop="status_display" label="状态" width="80">
         <template #default="{ row }">
-          <el-tag :type="getStatusType(row.status)" size="small">
+          <el-tag :type="getStatusType('action_log_status', 'action_log_status', row.status)" size="small">
             {{ row.status_display }}
           </el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="started_at" label="开始时间" width="160">
         <template #default="{ row }">
-          {{ formatTime(row.started_at) }}
+          {{ formatDateTime(row.started_at) }}
         </template>
       </el-table-column>
       <el-table-column prop="duration_ms" label="耗时" width="80">
@@ -31,6 +31,8 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import { getActionLogs } from '@/api/monitor'
+import { formatDateTime } from '@/utils/date'
+import { getStatusType } from '@/store/constants'
 
 const props = defineProps({
   serviceId: {
@@ -40,21 +42,6 @@ const props = defineProps({
 })
 
 const logs = ref([])
-
-const formatTime = (time) => {
-  if (!time) return ''
-  return new Date(time).toLocaleString('zh-CN')
-}
-
-const getStatusType = (status) => {
-  const typeMap = {
-    'success': 'success',
-    'failed': 'danger',
-    'started': 'warning',
-    'skipped': 'info'
-  }
-  return typeMap[status] || 'info'
-}
 
 const fetchActionLogs = async () => {
   if (!props.serviceId) return
@@ -88,7 +75,7 @@ onMounted(() => {
   .empty-state {
     text-align: center;
     padding: 20px;
-    color: #909399;
+    color: #64748B;
   }
 }
 </style>

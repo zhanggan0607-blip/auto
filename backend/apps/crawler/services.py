@@ -27,6 +27,8 @@ class UniversalCrawlerEngine(BaseCrawler):
     支持多级降级策略和自适应频率控制
     """
 
+    _cached_chromedriver_path = None
+
     def __init__(self, config: CrawlerConfig = None, website_template=None,
                  enable_multi_strategy: bool = True, proxy_list: List[str] = None):
         """
@@ -113,7 +115,11 @@ class UniversalCrawlerEngine(BaseCrawler):
         if self.website_template and self.website_template.selectors:
             selectors = self.website_template.selectors
 
-        for page in range(1, max_pages + 1):
+        pagination_config = self.website_template.pagination_config if self.website_template else {}
+        template_max_pages = pagination_config.get('max_pages')
+        effective_max_pages = min(max_pages, template_max_pages) if template_max_pages else max_pages
+
+        for page in range(1, effective_max_pages + 1):
             try:
                 page_url = self._build_page_url(target_url, page, keywords, **kwargs)
 
@@ -206,7 +212,10 @@ class UniversalCrawlerEngine(BaseCrawler):
         selectors = self.website_template.selectors or {}
         pagination_config = self.website_template.pagination_config or {}
         
-        for page in range(1, max_pages + 1):
+        template_max_pages = pagination_config.get('max_pages')
+        effective_max_pages = min(max_pages, template_max_pages) if template_max_pages else max_pages
+        
+        for page in range(1, effective_max_pages + 1):
             try:
                 page_url = self._build_page_url(target_url, page, keywords, **kwargs)
                 
@@ -351,7 +360,10 @@ class UniversalCrawlerEngine(BaseCrawler):
             return None
 
     def _find_chromedriver(self) -> Optional[str]:
-        """查找可用的ChromeDriver"""
+        """查找可用的ChromeDriver（带缓存）"""
+        if self._cached_chromedriver_path is not None:
+            return self._cached_chromedriver_path
+
         import os
         import glob
 
@@ -364,10 +376,12 @@ class UniversalCrawlerEngine(BaseCrawler):
         if os.path.exists(cache_dir):
             versions = sorted(glob.glob(os.path.join(cache_dir, '*', 'chromedriver.exe')), reverse=True)
             if versions:
+                UniversalCrawlerEngine._cached_chromedriver_path = versions[0]
                 return versions[0]
 
         for path in possible_paths:
             if os.path.exists(path):
+                UniversalCrawlerEngine._cached_chromedriver_path = path
                 return path
 
         chromedriver_in_path = None
@@ -377,6 +391,7 @@ class UniversalCrawlerEngine(BaseCrawler):
                 chromedriver_in_path = full_path
                 break
 
+        UniversalCrawlerEngine._cached_chromedriver_path = chromedriver_in_path
         return chromedriver_in_path
 
     def _build_page_url(self, base_url: str, page: int, 
@@ -697,14 +712,15 @@ class UniversalCrawlerEngine(BaseCrawler):
                         current_page: int) -> bool:
         """
         判断是否有下一页
+        注意：翻页上限由外层循环的 effective_max_pages 控制，此处不再检查 pagination_config['max_pages']
         """
-        if pagination_config.get('max_pages'):
-            if current_page >= pagination_config['max_pages']:
-                return False
-        
         next_selectors = pagination_config.get('next_selectors', [
             '.next a', '.pagination .next a', 'a[rel="next"]'
         ])
+        
+        next_button = pagination_config.get('next_button')
+        if next_button:
+            next_selectors = [next_button] + next_selectors
         
         for selector in next_selectors:
             if soup.select_one(selector):

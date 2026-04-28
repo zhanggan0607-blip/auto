@@ -119,16 +119,24 @@ class CrawlSession(models.Model):
 
 
 class CrawlResult(models.Model):
-    """
-    采集结果模型 - 存储采集到的原始数据
-    """
     session = models.ForeignKey(
         CrawlSession,
         on_delete=models.CASCADE,
         verbose_name='采集会话',
         related_name='results'
     )
-    
+
+    tender_project = models.ForeignKey(
+        'tenders.TenderProject',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name='关联招标项目',
+        related_name='crawl_results',
+        help_text='采集结果转化为正式招标项目后的关联'
+    )
+
     title = models.CharField('标题', max_length=500, db_index=True)
     source_url = models.URLField('来源URL', max_length=1000)
     detail_url = models.URLField('详情URL', max_length=1000, blank=True, null=True)
@@ -176,7 +184,6 @@ class CrawlResult(models.Model):
 
     def __str__(self):
         return self.title
-
 
 class CrawlLog(models.Model):
     """
@@ -349,6 +356,7 @@ class BidProjectTracking(models.Model):
 
 
 from .scheduler_models import CrawlSchedule, CrawlScheduleLog
+from .assurance_models import CrawlHealthCheck, CrawlOptimizationPlan, CrawlAssuranceReport
 
 
 class ContentRecognitionRule(models.Model):

@@ -1,11 +1,8 @@
-/**
- * 投标文档向量库 API
- */
 import request from '@/utils/request'
 
 export const vectorlibApi = {
   getDocuments(params = {}) {
-    return request.get('/v1/vectorlib/documents/', params)
+    return request.get('/v1/vectorlib/documents/', { params })
   },
 
   getDocument(id) {
@@ -14,6 +11,15 @@ export const vectorlibApi = {
 
   uploadDocument(formData, onProgress) {
     return request.post('/v1/vectorlib/documents/', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      onUploadProgress: onProgress
+    })
+  },
+
+  batchUpload(formData, onProgress) {
+    return request.post('/v1/vectorlib/documents/batch_upload/', formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       },
@@ -37,16 +43,12 @@ export const vectorlibApi = {
     return request.post(`/v1/vectorlib/documents/${id}/increment_view/`)
   },
 
-  incrementUse(id) {
-    return request.post(`/v1/vectorlib/documents/${id}/increment_use/`)
-  },
-
   getStatistics() {
     return request.get('/v1/vectorlib/documents/statistics/')
   },
 
   getAISearchTasks(params = {}) {
-    return request.get('/v1/vectorlib/ai-search/', params)
+    return request.get('/v1/vectorlib/ai-search/', { params })
   },
 
   createAISearchTask(data) {

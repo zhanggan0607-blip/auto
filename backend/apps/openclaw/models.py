@@ -2,9 +2,13 @@
 大模型配置模块
 支持多种AI大模型的配置和切换
 """
+import logging
+
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 
 class LLMProvider(models.Model):
@@ -32,7 +36,7 @@ class LLMProvider(models.Model):
     code = models.CharField('提供商编码', max_length=50, unique=True)
 
     base_url = models.URLField('API基础URL', max_length=500, blank=True, null=True)
-    api_key = models.TextField('API密钥', blank=True, null=True, help_text='加密存储')
+    encrypted_api_key = models.TextField('API密钥(加密)', db_column='api_key', blank=True, null=True)
 
     default_model = models.CharField('默认模型', max_length=100)
     available_models = models.JSONField('可用模型列表', default=list, blank=True)
@@ -65,6 +69,30 @@ class LLMProvider(models.Model):
     def __str__(self):
         return f"{self.name} ({self.get_provider_type_display()})"
 
+    @property
+    def api_key(self):
+        from utils.crypto import decrypt_sensitive_data
+        if not self.encrypted_api_key:
+            return ''
+        try:
+            decrypted = decrypt_sensitive_data(self.encrypted_api_key)
+            return decrypted
+        except ValueError as e:
+            logger.error(f"API密钥解密失败: {e}")
+            return ''
+
+    @api_key.setter
+    def api_key(self, value):
+        if not value:
+            self.encrypted_api_key = ''
+            return
+        from utils.crypto import encrypt_sensitive_data
+        try:
+            self.encrypted_api_key = encrypt_sensitive_data(value)
+        except Exception as e:
+            logger.error(f"API密钥加密失败: {e}")
+            raise ValueError("API密钥加密失败，请检查加密配置") from e
+
     def save(self, *args, **kwargs):
         if self.is_default:
             LLMProvider.objects.filter(is_default=True).exclude(pk=self.pk).update(is_default=False)
@@ -81,7 +109,7 @@ class LLMProvider(models.Model):
             'openai': ['gpt-4o', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'],
             'azure_openai': ['gpt-4o', 'gpt-4-turbo', 'gpt-35-turbo'],
             'anthropic': ['claude-3-opus', 'claude-3-sonnet', 'claude-3-haiku'],
-            'ollama': ['qwen2.5:14b', 'qwen2.5:72b', 'llama3.1:70b'],
+            'ollama': ['qwen3:8b', 'qwen3:4b', 'qwen3-vl:8b', 'deepseek-r1:8b', 'gemma3:12b', 'gemma4:e4b', 'gpt-oss:20b'],
             'vllm': ['Qwen/Qwen2.5-14B-Instruct', 'Qwen/Qwen2.5-72B-Instruct'],
             'zhipu': ['glm-4', 'glm-4-flash', 'glm-4-plus'],
             'qwen': ['qwen-turbo', 'qwen-plus', 'qwen-max'],
@@ -528,6 +556,7 @@ class NotificationConfig(models.Model):
     """
     通知参数配置
     控制各类事件的通知方式和范围
+    支持钉钉、飞书、企业微信多渠道
     """
     config = models.ForeignKey(
         AutomationConfig,
@@ -538,6 +567,8 @@ class NotificationConfig(models.Model):
 
     NOTIFICATION_ENABLED = models.BooleanField('启用通知', default=True)
     DINGTALK_ENABLED = models.BooleanField('钉钉通知', default=True)
+    FEISHU_ENABLED = models.BooleanField('飞书通知', default=False)
+    WECOM_ENABLED = models.BooleanField('企业微信通知', default=False)
     KEY_EVENTS_ONLY = models.BooleanField(
         '仅关键事件', default=False,
         help_text='开启后仅对关键事件发送通知'
@@ -551,6 +582,11 @@ class NotificationConfig(models.Model):
     NOTIFY_ON_WIN = models.BooleanField('中标通知', default=True)
     NOTIFY_ON_LOSS = models.BooleanField('失标通知', default=True)
 
+    MULTI_CHANNEL_ENABLED = models.BooleanField(
+        '多渠道同步通知', default=False,
+        help_text='开启后同一事件同时推送到所有已配置渠道'
+    )
+
     created_at = models.DateTimeField('创建时间', default=timezone.now)
     updated_at = models.DateTimeField('更新时间', auto_now=True)
 
@@ -561,3 +597,7 @@ class NotificationConfig(models.Model):
 
     def __str__(self):
         return f"通知配置 - {self.config.name}"
+
+
+from apps.openclaw.feedback_models import BidFeedbackRecord, GenerationStrategy, StrategyLearningLog  # noqa: E402,F401
+from apps.openclaw.memory_models import AgentMemoryStore, EnterpriseBidExperience  # noqa: E402,F401

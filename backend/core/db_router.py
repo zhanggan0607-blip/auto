@@ -4,6 +4,7 @@
 """
 import logging
 import random
+import threading
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,14 @@ class ReadWriteRouter:
         """
         读操作路由
         """
+        if getattr(_db_hint, 'force_primary', False):
+            return self.WRITE_DB_ALIAS
+
+        if getattr(_db_hint, 'force_replica', False):
+            if self._is_replica_available():
+                return self.READ_DB_ALIAS
+            return self.WRITE_DB_ALIAS
+
         if self._should_use_primary(model):
             return self.WRITE_DB_ALIAS
         
@@ -59,16 +68,23 @@ class ReadWriteRouter:
         """
         return self.WRITE_DB_ALIAS
     
+    REPLICAS = {'default', 'replica'}
+
     def allow_relation(self, obj1, obj2, **hints):
         """
         允许同一数据库中的对象之间建立关系
+        default和replica是同一数据库的读写分离，允许跨库关联
         """
         db1 = getattr(obj1, '_state', None) and obj1._state.db
         db2 = getattr(obj2, '_state', None) and obj2._state.db
-        
+
         if db1 and db2:
-            return db1 == db2
-        
+            if db1 == db2:
+                return True
+            if db1 in self.REPLICAS and db2 in self.REPLICAS:
+                return True
+            return False
+
         return True
     
     def allow_migrate(self, db, app_label, model_name=None, **hints):
@@ -149,27 +165,27 @@ class PrimaryReplicaRouter:
         return db == 'default'
 
 
+_db_hint = threading.local()
+
+
 def use_primary_db(func):
     """
     装饰器：强制使用主库
     用于需要读取最新数据的场景
+    
+    通过threading.local设置路由提示，ReadWriteRouter.db_for_read会检查此提示
     """
     from functools import wraps
-    
+
     @wraps(func)
     def wrapper(*args, **kwargs):
-        from django.db import connections
-        
-        old_db = None
+        prev = getattr(_db_hint, 'force_primary', False)
+        _db_hint.force_primary = True
         try:
-            from django.db import DEFAULT_DB_ALIAS
-            old_db = getattr(connections['default'], 'alias', DEFAULT_DB_ALIAS)
-            
-            result = func(*args, **kwargs)
-            return result
+            return func(*args, **kwargs)
         finally:
-            pass
-    
+            _db_hint.force_primary = prev
+
     return wrapper
 
 
@@ -179,15 +195,14 @@ def use_replica_db(func):
     用于报表查询等场景
     """
     from functools import wraps
-    
+
     @wraps(func)
     def wrapper(*args, **kwargs):
-        from django.db import connections
-        
+        prev = getattr(_db_hint, 'force_replica', False)
+        _db_hint.force_replica = True
         try:
-            connections['replica'].ensure_connection()
             return func(*args, **kwargs)
-        except Exception:
-            return func(*args, **kwargs)
-    
+        finally:
+            _db_hint.force_replica = prev
+
     return wrapper

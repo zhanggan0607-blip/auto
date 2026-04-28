@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="automation-monitor">
     <div class="page-header">
       <div class="header-left">
@@ -260,20 +260,15 @@ const flowStages = ref([
   { id: 'upload', name: '标书上交', status: 'idle', count: 0, unit: '份', autoRate: 0 }
 ])
 
-const anomalies = ref([
-  { time: '2024-01-15 14:30', stage: 'crawl', message: '网站A采集被限流，已自动切换代理IP', handled: true },
-  { time: '2024-01-15 15:20', stage: 'match', message: '企业资质信息不完整，无法完成自动匹配', handled: false }
-])
+const anomalies = ref([])
 
-const pendingActions = ref([
-  { time: '2024-01-15 16:00', type: 'high_amount', description: '项目金额超过500万，需人工确认是否投标', handled: false }
-])
+const pendingActions = ref([])
 
 const efficiencyStats = ref({
-  overallRate: 85,
-  avgDuration: '2.5分钟',
-  timeSaved: '78%',
-  selfHealRate: 92
+  overallRate: 0,
+  avgDuration: '-',
+  timeSaved: '-',
+  selfHealRate: 0
 })
 
 const overallStatusType = computed(() => {
@@ -299,9 +294,9 @@ const formatTrend = (trend) => {
 }
 
 const getRateColor = (rate) => {
-  if (rate >= 80) return '#67c23a'
-  if (rate >= 60) return '#e6a23c'
-  return '#f56c6c'
+  if (rate >= 80) return '#16A34A'
+  if (rate >= 60) return '#EA580C'
+  return '#DC2626'
 }
 
 const getStageTagType = (stage) => {
@@ -425,7 +420,7 @@ onUnmounted(() => {
 <style scoped lang="scss">
 .automation-monitor {
   padding: 20px;
-  background-color: #f5f7fa;
+  background-color: #F1F5F9;
   min-height: calc(100vh - 60px);
 }
 
@@ -440,13 +435,13 @@ onUnmounted(() => {
       margin: 0 0 4px 0;
       font-size: 20px;
       font-weight: 600;
-      color: #303133;
+      color: #1E293B;
     }
 
     .page-subtitle {
       margin: 0;
       font-size: 14px;
-      color: #909399;
+      color: #64748B;
     }
   }
 
@@ -480,12 +475,12 @@ onUnmounted(() => {
   .stat-value {
     font-size: 28px;
     font-weight: bold;
-    color: #303133;
+    color: #1E293B;
   }
 
   .stat-label {
     font-size: 14px;
-    color: #909399;
+    color: #64748B;
     margin-top: 4px;
   }
 
@@ -494,15 +489,15 @@ onUnmounted(() => {
     margin-top: 4px;
 
     &.trend-up {
-      color: #67c23a;
+      color: #16A34A;
     }
 
     &.trend-down {
-      color: #f56c6c;
+      color: #DC2626;
     }
 
     &.trend-flat {
-      color: #909399;
+      color: #64748B;
     }
   }
 }
@@ -529,7 +524,7 @@ onUnmounted(() => {
         align-items: center;
         gap: 6px;
         font-size: 12px;
-        color: #909399;
+        color: #64748B;
 
         .dot {
           width: 8px;
@@ -537,15 +532,15 @@ onUnmounted(() => {
           border-radius: 50%;
 
           &.success {
-            background: #67c23a;
+            background: #16A34A;
           }
 
           &.idle {
-            background: #909399;
+            background: #64748B;
           }
 
           &.error {
-            background: #f56c6c;
+            background: #DC2626;
           }
         }
       }
@@ -565,7 +560,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 12px;
   padding: 12px 20px;
-  background: #f5f7fa;
+  background: #F1F5F9;
   border-radius: 8px;
   position: relative;
   flex: 1;
@@ -583,23 +578,23 @@ onUnmounted(() => {
 
   .stage-icon {
     font-size: 24px;
-    color: #909399;
+    color: #64748B;
 
     .pulse {
       animation: rotate 2s linear infinite;
     }
 
     .el-icon-loading {
-      color: #409eff;
+      color: #3B82F6;
     }
   }
 
   &.active .stage-icon {
-    color: #409eff;
+    color: #3B82F6;
   }
 
   &.error .stage-icon {
-    color: #f56c6c;
+    color: #DC2626;
   }
 
   .stage-info {
@@ -608,12 +603,12 @@ onUnmounted(() => {
     .stage-name {
       font-size: 14px;
       font-weight: 600;
-      color: #303133;
+      color: #1E293B;
     }
 
     .stage-count {
       font-size: 12px;
-      color: #909399;
+      color: #64748B;
       margin-top: 2px;
     }
   }
@@ -625,7 +620,7 @@ onUnmounted(() => {
   .flow-arrow {
     position: absolute;
     right: -20px;
-    color: #c0c4cc;
+    color: #CBD5E1;
     z-index: 1;
   }
 }
@@ -660,20 +655,20 @@ onUnmounted(() => {
 
   .efficiency-label {
     font-size: 14px;
-    color: #606266;
+    color: #334155;
     margin-bottom: 8px;
   }
 
   .efficiency-value {
     font-size: 32px;
     font-weight: bold;
-    color: #303133;
+    color: #1E293B;
     margin-bottom: 12px;
   }
 
   .efficiency-desc {
     font-size: 12px;
-    color: #909399;
+    color: #64748B;
     margin-top: 8px;
   }
 }

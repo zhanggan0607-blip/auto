@@ -1,0 +1,6 @@
+{
+  "lint-staged": {
+    "*.{ts,tsx,vue}": ["vue-tsc --noEmit", "eslint --fix"],
+    "*.{js,jsx}": ["eslint --fix"]
+  }
+}

@@ -10,29 +10,29 @@ from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
 from django.db.models import Q
 
-from utils.responses import APIResponse
+from utils.responses import UnifiedResponse
 from services.bid_automation_workflow import bid_automation_workflow, TaskStatus
 from services.bid_task_scheduler import bid_task_scheduler
-from core.viewsets import APIResponseMixin
+from common.views.base import APIResponseMixin
 
 logger = logging.getLogger(__name__)
 
 
 def run_async(coro):
-    """
-    在同步上下文中运行异步协程
-    """
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, coro)
-                return future.result()
-        else:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
             return loop.run_until_complete(coro)
+        finally:
+            loop.close()
     except RuntimeError:
-        return asyncio.run(coro)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
 
 
 class BidWorkflowViewSet(APIResponseMixin, viewsets.ViewSet):
@@ -51,7 +51,7 @@ class BidWorkflowViewSet(APIResponseMixin, viewsets.ViewSet):
         config = request.data.get('config', {})
         
         if not tender_id or not enterprise_id:
-            return APIResponse.error(
+            return UnifiedResponse.error(
                 message='缺少必要参数: tender_id, enterprise_id',
                 status_code=status.HTTP_400_BAD_REQUEST
             )
@@ -63,9 +63,9 @@ class BidWorkflowViewSet(APIResponseMixin, viewsets.ViewSet):
         ))
         
         if result.get('status') == 'started':
-            return APIResponse.success(data=result, message='工作流启动成功')
+            return UnifiedResponse.success(data=result, message='工作流启动成功')
         else:
-            return APIResponse.error(message=result.get('error', '启动失败'))
+            return UnifiedResponse.error(message=result.get('error', '启动失败'))
     
     @action(detail=False, methods=['get'])
     def status(self, request):
@@ -75,7 +75,7 @@ class BidWorkflowViewSet(APIResponseMixin, viewsets.ViewSet):
         workflow_id = request.query_params.get('workflow_id')
         
         if not workflow_id:
-            return APIResponse.error(
+            return UnifiedResponse.error(
                 message='缺少参数: workflow_id',
                 status_code=status.HTTP_400_BAD_REQUEST
             )
@@ -83,9 +83,9 @@ class BidWorkflowViewSet(APIResponseMixin, viewsets.ViewSet):
         result = run_async(bid_automation_workflow.get_workflow_status(workflow_id))
         
         if result:
-            return APIResponse.success(data=result)
+            return UnifiedResponse.success(data=result)
         else:
-            return APIResponse.error(message='工作流不存在', status_code=status.HTTP_404_NOT_FOUND)
+            return UnifiedResponse.error(message='工作流不存在', status_code=status.HTTP_404_NOT_FOUND)
     
     @action(detail=False, methods=['post'])
     def resume(self, request):
@@ -96,7 +96,7 @@ class BidWorkflowViewSet(APIResponseMixin, viewsets.ViewSet):
         action_type = request.data.get('action', 'continue')
         
         if not workflow_id:
-            return APIResponse.error(
+            return UnifiedResponse.error(
                 message='缺少参数: workflow_id',
                 status_code=status.HTTP_400_BAD_REQUEST
             )
@@ -104,9 +104,9 @@ class BidWorkflowViewSet(APIResponseMixin, viewsets.ViewSet):
         result = run_async(bid_automation_workflow.resume_workflow(workflow_id, action_type))
         
         if 'error' in result:
-            return APIResponse.error(message=result['error'])
+            return UnifiedResponse.error(message=result['error'])
         
-        return APIResponse.success(data=result, message='工作流已恢复')
+        return UnifiedResponse.success(data=result, message='工作流已恢复')
     
     @action(detail=False, methods=['get'])
     def list_active(self, request):
@@ -129,7 +129,7 @@ class BidWorkflowViewSet(APIResponseMixin, viewsets.ViewSet):
             'started_at': wf.started_at.isoformat() if wf.started_at else None
         } for wf in workflows]
         
-        return APIResponse.success(data={'list': data})
+        return UnifiedResponse.success(data={'list': data})
     
     @action(detail=False, methods=['get'])
     def statistics(self, request):
@@ -270,7 +270,7 @@ class BidWorkflowViewSet(APIResponseMixin, viewsets.ViewSet):
         if total_bids > 0 and won_bids > 0:
             time_saved_percent = min(95, int((won_bids / total_bids) * 100))
 
-        return APIResponse.success(data={
+        return UnifiedResponse.success(data={
             'crawled_today': crawled_today,
             'crawled_trend': crawled_trend,
             'matched_today': matched_today,
@@ -319,7 +319,7 @@ class TaskSchedulerViewSet(APIResponseMixin, viewsets.ViewSet):
         获取调度器状态
         """
         result = run_async(bid_task_scheduler.get_scheduler_status())
-        return APIResponse.success(data=result)
+        return UnifiedResponse.success(data=result)
     
     @action(detail=False, methods=['post'])
     def start(self, request):
@@ -327,7 +327,7 @@ class TaskSchedulerViewSet(APIResponseMixin, viewsets.ViewSet):
         启动调度器
         """
         run_async(bid_task_scheduler.start())
-        return APIResponse.success(message='调度器已启动')
+        return UnifiedResponse.success(message='调度器已启动')
     
     @action(detail=False, methods=['post'])
     def stop(self, request):
@@ -335,7 +335,7 @@ class TaskSchedulerViewSet(APIResponseMixin, viewsets.ViewSet):
         停止调度器
         """
         run_async(bid_task_scheduler.stop())
-        return APIResponse.success(message='调度器已停止')
+        return UnifiedResponse.success(message='调度器已停止')
     
     @action(detail=False, methods=['post'])
     def enable_task(self, request):
@@ -344,11 +344,11 @@ class TaskSchedulerViewSet(APIResponseMixin, viewsets.ViewSet):
         """
         task_id = request.data.get('task_id')
         if not task_id:
-            return APIResponse.error(message='缺少参数: task_id')
+            return UnifiedResponse.error(message='缺少参数: task_id')
         success = run_async(bid_task_scheduler.enable_task(task_id))
         if success:
-            return APIResponse.success(message='任务已启用')
-        return APIResponse.error(message='任务不存在')
+            return UnifiedResponse.success(message='任务已启用')
+        return UnifiedResponse.error(message='任务不存在')
     
     @action(detail=False, methods=['post'])
     def disable_task(self, request):
@@ -357,11 +357,11 @@ class TaskSchedulerViewSet(APIResponseMixin, viewsets.ViewSet):
         """
         task_id = request.data.get('task_id')
         if not task_id:
-            return APIResponse.error(message='缺少参数: task_id')
+            return UnifiedResponse.error(message='缺少参数: task_id')
         success = run_async(bid_task_scheduler.disable_task(task_id))
         if success:
-            return APIResponse.success(message='任务已禁用')
-        return APIResponse.error(message='任务不存在')
+            return UnifiedResponse.success(message='任务已禁用')
+        return UnifiedResponse.error(message='任务不存在')
     
     @action(detail=False, methods=['post'])
     def run_now(self, request):
@@ -370,11 +370,11 @@ class TaskSchedulerViewSet(APIResponseMixin, viewsets.ViewSet):
         """
         task_id = request.data.get('task_id')
         if not task_id:
-            return APIResponse.error(message='缺少参数: task_id')
+            return UnifiedResponse.error(message='缺少参数: task_id')
         result = run_async(bid_task_scheduler.run_task_now(task_id))
         if result.get('success'):
-            return APIResponse.success(message=result.get('message', '执行完成'))
-        return APIResponse.error(message=result.get('error', '执行失败'))
+            return UnifiedResponse.success(message=result.get('message', '执行完成'))
+        return UnifiedResponse.error(message=result.get('error', '执行失败'))
     
     @action(detail=False, methods=['get'])
     def health(self, request):
@@ -385,7 +385,7 @@ class TaskSchedulerViewSet(APIResponseMixin, viewsets.ViewSet):
         
         health = cache.get('system_health', {})
         
-        return APIResponse.success(data={
+        return UnifiedResponse.success(data={
             'status': 'healthy' if health.get('database') == 'ok' else 'degraded',
             'details': health,
             'timestamp': timezone.now().isoformat()

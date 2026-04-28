@@ -364,22 +364,28 @@ class BidSubmissionSkill(Skill):
 class NotificationSkill(Skill):
     """
     通知发送技能
+    支持钉钉、飞书、企业微信、邮件、短信、Webhook
     """
     
     metadata = SkillMetadata(
         name='notification_sender',
-        description='发送通知消息',
-        version='1.0.0',
+        description='发送通知消息（支持钉钉/飞书/企微/邮件/短信/Webhook）',
+        version='2.0.0',
         author='OpenClaw',
         category='uploader',
-        tags=['notification', 'message', 'alert'],
+        tags=['notification', 'message', 'alert', 'feishu', 'wecom'],
         input_schema={
             'type': 'object',
             'properties': {
                 'channel': {
                     'type': 'string',
-                    'enum': ['dingtalk', 'email', 'sms', 'webhook'],
-                    'description': '通知渠道'
+                    'enum': ['dingtalk', 'feishu', 'wecom', 'email', 'sms', 'webhook', 'all'],
+                    'description': '通知渠道（all=所有已配置渠道）'
+                },
+                'channels': {
+                    'type': 'array',
+                    'items': {'type': 'string'},
+                    'description': '多渠道列表（优先于channel）'
                 },
                 'title': {
                     'type': 'string',
@@ -387,15 +393,20 @@ class NotificationSkill(Skill):
                 },
                 'content': {
                     'type': 'string',
-                    'description': '通知内容'
+                    'description': '通知内容（支持Markdown）'
                 },
                 'recipients': {
                     'type': 'array',
                     'items': {'type': 'string'},
                     'description': '接收者列表'
+                },
+                'at_all': {
+                    'type': 'boolean',
+                    'description': '是否@所有人',
+                    'default': False
                 }
             },
-            'required': ['channel', 'content']
+            'required': ['content']
         }
     )
     
@@ -403,14 +414,26 @@ class NotificationSkill(Skill):
         """
         执行通知发送
         """
-        channel = kwargs.get('channel')
+        channel = kwargs.get('channel', 'dingtalk')
+        channels = kwargs.get('channels')
         title = kwargs.get('title', '')
         content = kwargs.get('content')
         recipients = kwargs.get('recipients', [])
+        at_all = kwargs.get('at_all', False)
+
+        if not content:
+            return SkillResult(success=False, error='通知内容不能为空')
         
         try:
-            if channel == 'dingtalk':
-                result = await self._send_dingtalk(title, content)
+            if channels or channel == 'all':
+                target_channels = channels if channels else None
+                result = await self._send_unified(title, content, target_channels, at_all)
+            elif channel == 'dingtalk':
+                result = await self._send_dingtalk(title, content, at_all)
+            elif channel == 'feishu':
+                result = await self._send_feishu(title, content)
+            elif channel == 'wecom':
+                result = await self._send_wecom(title, content, at_all)
             elif channel == 'email':
                 result = await self._send_email(title, content, recipients)
             elif channel == 'sms':
@@ -423,6 +446,7 @@ class NotificationSkill(Skill):
                 data=result,
                 metadata={
                     'channel': channel,
+                    'channels': channels,
                     'timestamp': datetime.now().isoformat()
                 }
             )
@@ -432,6 +456,57 @@ class NotificationSkill(Skill):
                 success=False,
                 error=str(e)
             )
+
+    async def _send_unified(
+        self,
+        title: str,
+        content: str,
+        channels: list = None,
+        at_all: bool = False
+    ) -> Dict:
+        """
+        使用统一通知服务发送
+        """
+        from services.unified_notification_service import unified_notification_service
+
+        results = unified_notification_service.send(
+            title=title or '系统通知',
+            content=content,
+            channels=channels,
+            markdown=True,
+            at_all=at_all
+        )
+
+        return {
+            'status': 'sent',
+            'channels': results,
+            'success_count': sum(1 for v in results.values() if v),
+            'total_channels': len(results)
+        }
+
+    async def _send_feishu(self, title: str, content: str) -> Dict:
+        """
+        发送飞书通知
+        """
+        from services.unified_notification_service import unified_notification_service
+
+        success = unified_notification_service.feishu.send_markdown(
+            title=title or '系统通知',
+            content=content
+        )
+
+        return {'status': 'sent' if success else 'failed', 'channel': 'feishu'}
+
+    async def _send_wecom(self, title: str, content: str, at_all: bool = False) -> Dict:
+        """
+        发送企业微信通知
+        """
+        from services.unified_notification_service import unified_notification_service
+
+        wecom_content = f"**{title or '系统通知'}**\n\n{content}" if title else content
+        success = unified_notification_service.wecom.send_markdown(content=wecom_content)
+
+        return {'status': 'sent' if success else 'failed', 'channel': 'wecom'}
     
     async def _send_dingtalk(self, title: str, content: str) -> Dict:
         """

@@ -2,6 +2,7 @@
 定时采集任务 - 视图
 """
 import logging
+import os
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -20,8 +21,8 @@ from services.qualification_matcher import QualificationMatcher, tender_qualific
 from apps.tenders.models import TenderProject
 from apps.enterprise.models import Enterprise, EnterpriseBidConfig
 
-from utils.responses import APIResponse
-from core.viewsets import APIResponseMixin
+from utils.responses import UnifiedResponse
+from common.views.base import APIResponseMixin
 from core.progress_tracker import progress_tracker
 
 logger = logging.getLogger(__name__)
@@ -85,7 +86,7 @@ class CrawlScheduleViewSet(APIResponseMixin, viewsets.ModelViewSet):
         schedule.save()
         schedule.update_celery_task()
 
-        return APIResponse.success(
+        return UnifiedResponse.success(
             message='采集计划已启用',
             data={'schedule': CrawlScheduleSerializer(schedule).data}
         )
@@ -105,7 +106,7 @@ class CrawlScheduleViewSet(APIResponseMixin, viewsets.ModelViewSet):
         schedule.save()
         schedule.update_celery_task()
 
-        return APIResponse.success(
+        return UnifiedResponse.success(
             message='采集计划已暂停',
             data={'schedule': CrawlScheduleSerializer(schedule).data}
         )
@@ -122,6 +123,7 @@ class CrawlScheduleViewSet(APIResponseMixin, viewsets.ModelViewSet):
         schedule = self.get_object()
 
         task_id = f"crawl_schedule_{schedule.id}"
+        progress_created = False
 
         try:
             progress_tracker.create_task(
@@ -133,47 +135,98 @@ class CrawlScheduleViewSet(APIResponseMixin, viewsets.ModelViewSet):
             )
             progress_tracker.start_task(task_id)
             progress_tracker.update_progress(task_id, 5, 5, "正在初始化采集环境...")
+            progress_created = True
         except Exception as e:
             logger.warning(f"创建进度追踪失败: {e}")
 
+        use_thread_execution = False
+        celery_task_id = None
+
         try:
-            from crawler.tasks import scheduled_crawl_with_match
-            task = scheduled_crawl_with_match.delay(schedule.id)
-
-            return APIResponse.success(
-                message='采集任务已提交执行',
-                data={
-                    'task_id': task_id,
-                    'celery_task_id': task.id,
-                    'schedule_id': schedule.id
-                }
-            )
+            import socket
+            redis_host = os.environ.get('REDIS_HOST', 'localhost')
+            redis_port = int(os.environ.get('REDIS_PORT', '6379'))
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.5)
+            result = sock.connect_ex((redis_host, redis_port))
+            sock.close()
+            if result != 0:
+                logger.warning(f"Redis不可用({redis_host}:{redis_port})，改用后台线程执行")
+                use_thread_execution = True
         except Exception as e:
-            logger.warning(f"Celery不可用，改用后台线程执行: {str(e)}")
+            logger.warning(f"Redis连接检测失败，改用后台线程执行: {str(e)}")
+            use_thread_execution = True
 
+        if not use_thread_execution:
+            try:
+                from crawler.tasks import scheduled_crawl_with_match
+                from config.celery import app
+
+                task = scheduled_crawl_with_match.delay(schedule.id)
+                celery_task_id = task.id
+
+                import time
+                time.sleep(1)
+
+                inspector = app.control.inspect(timeout=2)
+                active_tasks = inspector.active() or {}
+                registered = inspector.registered() or {}
+
+                has_worker = bool(active_tasks) or bool(registered)
+
+                if not has_worker:
+                    logger.warning(f"Celery worker不可用，改用后台线程执行")
+                    use_thread_execution = True
+                else:
+                    logger.info(f"Celery任务已提交: {task.id}")
+
+            except Exception as e:
+                logger.warning(f"Celery不可用，改用后台线程执行: {str(e)}")
+                use_thread_execution = True
+
+        if use_thread_execution:
             import threading
 
             def run_crawl():
                 try:
-                    scheduled_crawl_with_match(schedule.id)
+                    from crawler.tasks import scheduled_crawl_with_match as crawl_fn
+                    crawl_fn(schedule.id)
                 except Exception as ex:
                     logger.error(f"后台采集任务执行失败: {str(ex)}")
-                    try:
-                        progress_tracker.fail_task(task_id, str(ex))
-                    except:
-                        pass
+                    if progress_created:
+                        try:
+                            progress_tracker.fail_task(task_id, str(ex))
+                        except:
+                            pass
 
             thread = threading.Thread(target=run_crawl)
             thread.daemon = True
             thread.start()
 
-            return APIResponse.success(
+            response_data = {
+                'schedule_id': schedule.id,
+                'execution_mode': 'thread'
+            }
+            if progress_created:
+                response_data['task_id'] = task_id
+
+            return UnifiedResponse.success(
                 message='采集任务已在后台启动，请稍后刷新查看结果',
-                data={
-                    'task_id': task_id,
-                    'schedule_id': schedule.id
-                }
+                data=response_data
             )
+
+        response_data = {
+            'celery_task_id': celery_task_id,
+            'schedule_id': schedule.id,
+            'execution_mode': 'celery'
+        }
+        if progress_created:
+            response_data['task_id'] = task_id
+
+        return UnifiedResponse.success(
+            message='采集任务已提交执行',
+            data=response_data
+        )
 
     @extend_schema(
         summary='获取执行日志',
@@ -188,7 +241,7 @@ class CrawlScheduleViewSet(APIResponseMixin, viewsets.ModelViewSet):
         logs = CrawlScheduleLog.objects.filter(schedule=schedule)[:50]
 
         serializer = CrawlScheduleLogSerializer(logs, many=True)
-        return APIResponse.success(data={'list': serializer.data})
+        return UnifiedResponse.success(data={'list': serializer.data})
 
     @extend_schema(
         summary='获取统计信息',
@@ -203,7 +256,7 @@ class CrawlScheduleViewSet(APIResponseMixin, viewsets.ModelViewSet):
         active = CrawlSchedule.objects.filter(status='active', is_active=True).count()
         paused = CrawlSchedule.objects.filter(status='paused').count()
 
-        return APIResponse.success(
+        return UnifiedResponse.success(
             data={
                 'total': total,
                 'active': active,
@@ -228,7 +281,7 @@ class CrawlScheduleViewSet(APIResponseMixin, viewsets.ModelViewSet):
         exclude_id = request.query_params.get('exclude_id')
 
         if not name:
-            return APIResponse.error(message='计划名称不能为空')
+            return UnifiedResponse.error(message='计划名称不能为空')
 
         queryset = CrawlSchedule.objects.filter(name=name)
 
@@ -240,25 +293,12 @@ class CrawlScheduleViewSet(APIResponseMixin, viewsets.ModelViewSet):
 
         is_duplicate = queryset.exists()
 
-        return APIResponse.success(
+        return UnifiedResponse.success(
             data={
                 'is_duplicate': is_duplicate,
                 'name': name
             }
         )
-
-
-class CrawlScheduleLogViewSet(APIResponseMixin, viewsets.ReadOnlyModelViewSet):
-    """
-    采集计划日志视图集（只读）
-    """
-    queryset = CrawlScheduleLog.objects.all()
-    serializer_class = CrawlScheduleLogSerializer
-    permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['schedule', 'status']
-    ordering = ['-started_at']
-
 
 class QualificationMatchViewSet(APIResponseMixin, viewsets.ViewSet):
     """
@@ -313,7 +353,7 @@ class QualificationMatchViewSet(APIResponseMixin, viewsets.ViewSet):
         enterprise, bid_config = self._get_enterprise_config(request.user)
         
         if not enterprise:
-            return APIResponse.not_found(message='未找到企业信息，请先配置企业资料')
+            return UnifiedResponse.not_found(message='未找到企业信息，请先配置企业资料')
 
         matcher = QualificationMatcher(enterprise, bid_config)
         results = matcher.match_tenders_batch(list(tenders[:100]), threshold)
@@ -335,7 +375,7 @@ class QualificationMatchViewSet(APIResponseMixin, viewsets.ViewSet):
                 tender.keywords_matched = result.match_details
                 tender.save(update_fields=['status', 'keywords_matched'])
 
-        return APIResponse.success(
+        return UnifiedResponse.success(
             data={
                 'total': len(results),
                 'matched': matched_count,
@@ -379,12 +419,12 @@ class QualificationMatchViewSet(APIResponseMixin, viewsets.ViewSet):
         enterprise, bid_config = self._get_enterprise_config(request.user)
         
         if not enterprise:
-            return APIResponse.not_found(message='未找到企业信息，请先配置企业资料')
+            return UnifiedResponse.not_found(message='未找到企业信息，请先配置企业资料')
 
         matcher = QualificationMatcher(enterprise, bid_config)
         results = matcher.match_tenders_batch(list(tenders), threshold)
 
-        return APIResponse.success(
+        return UnifiedResponse.success(
             data={
                 'total': len(results),
                 'matched': sum(1 for r in results if r.is_matched),
@@ -415,11 +455,11 @@ class QualificationMatchViewSet(APIResponseMixin, viewsets.ViewSet):
         enterprise, bid_config = self._get_enterprise_config(request.user)
 
         if not enterprise:
-            return APIResponse.not_found(message='未找到企业信息，请先配置企业资料')
+            return UnifiedResponse.not_found(message='未找到企业信息，请先配置企业资料')
 
         matcher = QualificationMatcher(enterprise, bid_config)
 
-        return APIResponse.success(
+        return UnifiedResponse.success(
             data={
                 'enterprise_name': enterprise.name,
                 'rules': matcher.rules

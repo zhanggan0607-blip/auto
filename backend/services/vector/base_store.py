@@ -142,7 +142,7 @@ class BaseVectorStore(ABC):
         Returns:
             bool: 是否成功
         """
-        if not chroma_client.is_available():
+        if not chroma_client.is_available:
             logger.warning(f"向量库不可用，无法添加{self.collection_name}向量")
             return False
 
@@ -174,7 +174,7 @@ class BaseVectorStore(ABC):
         Returns:
             int: 成功添加的数量
         """
-        if not chroma_client.is_available():
+        if not chroma_client.is_available:
             logger.warning(f"向量库不可用，无法批量添加{self.collection_name}向量")
             return 0
 
@@ -227,7 +227,7 @@ class BaseVectorStore(ABC):
         Returns:
             list: 匹配结果列表
         """
-        if not chroma_client.is_available():
+        if not chroma_client.is_available:
             logger.warning(f"向量库不可用，无法进行{self.collection_name}语义搜索")
             return []
 
@@ -285,7 +285,7 @@ class BaseVectorStore(ABC):
         Returns:
             list: 匹配结果列表
         """
-        if not chroma_client.is_available():
+        if not chroma_client.is_available:
             return []
 
         try:
@@ -334,7 +334,7 @@ class BaseVectorStore(ABC):
         Returns:
             bool: 是否成功
         """
-        if not chroma_client.is_available():
+        if not chroma_client.is_available:
             return True
 
         try:
@@ -357,7 +357,7 @@ class BaseVectorStore(ABC):
         Returns:
             dict: 向量信息
         """
-        if not chroma_client.is_available():
+        if not chroma_client.is_available:
             return None
 
         try:

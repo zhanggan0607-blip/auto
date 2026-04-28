@@ -3,25 +3,14 @@
 """
 from rest_framework import serializers
 from .models import DocumentTemplate, GeneratedDocument
+from apps.vectorlib.models import BidDocumentLibrary
 
 
-class ReferenceDocSimpleSerializer(serializers.Serializer):
-    """
-    参考文档简要信息序列化器（用于显示关联的向量库文档）
-    """
-    id = serializers.IntegerField()
-    title = serializers.CharField()
-    document_type = serializers.CharField()
-    source_type = serializers.CharField()
-    quality_score = serializers.IntegerField()
-    file_url = serializers.SerializerMethodField()
+class ReferenceDocSimpleSerializer(serializers.ModelSerializer):
 
-    def get_file_url(self, obj):
-        if hasattr(obj, 'file_path') and obj.file_path:
-            request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.file_path.url)
-        return None
+    class Meta:
+        model = BidDocumentLibrary
+        fields = ['id', 'title', 'document_type', 'file_path', 'file_size', 'file_format', 'content_summary']
 
 
 class DocumentTemplateSerializer(serializers.ModelSerializer):

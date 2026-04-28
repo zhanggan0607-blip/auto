@@ -79,13 +79,17 @@ class BidDocumentGeneratorSkill(Skill):
             'qualification',
             'service_plan'
         ])
-        
+        reference_documents = kwargs.get('reference_documents', [])
+        reference_content = kwargs.get('reference_content', '')
+
         try:
             generated_sections = {}
-            
+
             for section in sections:
                 section_content = await self._generate_section(
-                    section, tender_info, enterprise_info
+                    section, tender_info, enterprise_info,
+                    reference_documents=reference_documents,
+                    reference_content=reference_content
                 )
                 generated_sections[section] = section_content
             
@@ -119,40 +123,57 @@ class BidDocumentGeneratorSkill(Skill):
         self,
         section: str,
         tender_info: Dict,
-        enterprise_info: Dict
+        enterprise_info: Dict,
+        reference_documents: List[Dict] = None,
+        reference_content: str = ''
     ) -> str:
         """
         生成单个章节
         """
         llm = self._get_llm_client()
-        
+
         section_prompts = {
             'technical_proposal': self._get_technical_proposal_prompt,
             'business_proposal': self._get_business_proposal_prompt,
             'qualification': self._get_qualification_prompt,
             'service_plan': self._get_service_plan_prompt
         }
-        
+
         prompt_func = section_prompts.get(section)
         if not prompt_func:
             return ''
-        
-        prompt = prompt_func(tender_info, enterprise_info)
+
+        prompt = prompt_func(
+            tender_info, enterprise_info,
+            reference_documents=reference_documents,
+            reference_content=reference_content
+        )
         result = await llm.chat(message=prompt)
-        
+
         return result.get('content', '')
     
     def _get_technical_proposal_prompt(
         self,
         tender_info: Dict,
-        enterprise_info: Dict
+        enterprise_info: Dict,
+        reference_documents: List[Dict] = None,
+        reference_content: str = ''
     ) -> str:
         """
         技术方案提示词
         """
+        ref_section = ""
+        if reference_content:
+            ref_section = f"""
+【历史优秀标书参考】
+以下是同类项目的高分标书内容，供您参考结构和表达方式：
+{reference_content[:3000]}
+---
+
+"""
         return f"""请根据以下招标要求和企业信息，撰写技术方案章节。
 
-招标项目信息：
+{ref_section}招标项目信息：
 {json.dumps(tender_info, ensure_ascii=False, indent=2)}
 
 企业信息：
@@ -163,20 +184,32 @@ class BidDocumentGeneratorSkill(Skill):
 2. 突出企业的技术优势和解决方案
 3. 包含技术实现方案、技术路线、关键技术等内容
 4. 语言专业、条理清晰
+5. 适当参考历史优秀标书的结构和表达方式
 
 请直接输出技术方案内容，不要添加标题。"""
     
     def _get_business_proposal_prompt(
         self,
         tender_info: Dict,
-        enterprise_info: Dict
+        enterprise_info: Dict,
+        reference_documents: List[Dict] = None,
+        reference_content: str = ''
     ) -> str:
         """
         商务方案提示词
         """
+        ref_section = ""
+        if reference_content:
+            ref_section = f"""
+【历史优秀标书参考】
+以下是同类项目的高分标书内容，供您参考结构和表达方式：
+{reference_content[:3000]}
+---
+
+"""
         return f"""请根据以下招标要求和企业信息，撰写商务方案章节。
 
-招标项目信息：
+{ref_section}招标项目信息：
 {json.dumps(tender_info, ensure_ascii=False, indent=2)}
 
 企业信息：
@@ -187,20 +220,32 @@ class BidDocumentGeneratorSkill(Skill):
 2. 说明价格构成的合理性
 3. 提供优惠条件和增值服务
 4. 语言专业、条理清晰
+5. 适当参考历史优秀标书的结构和表达方式
 
 请直接输出商务方案内容，不要添加标题。"""
     
     def _get_qualification_prompt(
         self,
         tender_info: Dict,
-        enterprise_info: Dict
+        enterprise_info: Dict,
+        reference_documents: List[Dict] = None,
+        reference_content: str = ''
     ) -> str:
         """
         资质证明提示词
         """
+        ref_section = ""
+        if reference_content:
+            ref_section = f"""
+【历史优秀标书参考】
+以下是同类项目的高分标书内容，供您参考结构和表达方式：
+{reference_content[:3000]}
+---
+
+"""
         return f"""请根据以下招标要求和企业信息，整理资质证明章节内容。
 
-招标项目信息：
+{ref_section}招标项目信息：
 {json.dumps(tender_info, ensure_ascii=False, indent=2)}
 
 企业信息：
@@ -211,20 +256,32 @@ class BidDocumentGeneratorSkill(Skill):
 2. 说明资质与项目要求的对应关系
 3. 突出核心资质和荣誉
 4. 语言专业、条理清晰
+5. 适当参考历史优秀标书的结构和表达方式
 
 请直接输出资质证明内容，不要添加标题。"""
     
     def _get_service_plan_prompt(
         self,
         tender_info: Dict,
-        enterprise_info: Dict
+        enterprise_info: Dict,
+        reference_documents: List[Dict] = None,
+        reference_content: str = ''
     ) -> str:
         """
         服务方案提示词
         """
+        ref_section = ""
+        if reference_content:
+            ref_section = f"""
+【历史优秀标书参考】
+以下是同类项目的高分标书内容，供您参考结构和表达方式：
+{reference_content[:3000]}
+---
+
+"""
         return f"""请根据以下招标要求和企业信息，撰写服务方案章节。
 
-招标项目信息：
+{ref_section}招标项目信息：
 {json.dumps(tender_info, ensure_ascii=False, indent=2)}
 
 企业信息：
@@ -235,6 +292,7 @@ class BidDocumentGeneratorSkill(Skill):
 2. 针对项目特点提供定制化服务方案
 3. 包含应急预案和售后保障
 4. 语言专业、条理清晰
+5. 适当参考历史优秀标书的结构和表达方式
 
 请直接输出服务方案内容，不要添加标题。"""
     

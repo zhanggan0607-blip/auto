@@ -1,4 +1,4 @@
-<template>
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<template>
   <div class="service-health-chart">
     <div v-if="loading" class="chart-loading">
       <el-icon class="rotating"><Loading /></el-icon>
@@ -22,7 +22,7 @@
             class="chart-bar"
             :class="item.is_healthy ? 'healthy' : 'unhealthy'"
             :style="{ height: `${getBarHeight(item)}%` }"
-            :title="`${formatTime(item.timestamp)}: ${item.is_healthy ? '健康' : '异常'}`"
+            :title="`${formatDateTime(item.timestamp)}: ${item.is_healthy ? '健康' : '异常'}`"
           ></div>
           <div class="chart-time">{{ formatHour(item.timestamp) }}</div>
         </div>
@@ -35,6 +35,8 @@
 import { ref, onMounted, watch } from 'vue'
 import { Loading } from '@element-plus/icons-vue'
 import { getHealthRecords } from '@/api/monitor'
+import { parseListResponse } from '@/utils/response-parser'
+import { formatDateTime } from '@/utils/date'
 
 const props = defineProps({
   serviceId: {
@@ -45,11 +47,6 @@ const props = defineProps({
 
 const loading = ref(false)
 const chartData = ref([])
-
-const formatTime = (time) => {
-  if (!time) return ''
-  return new Date(time).toLocaleString('zh-CN')
-}
 
 const formatHour = (time) => {
   if (!time) return ''
@@ -71,7 +68,8 @@ const fetchHealthRecords = async () => {
       hours: 24
     })
 
-    chartData.value = res.results || res || []
+    const { list } = parseListResponse(res)
+    chartData.value = list
   } catch (error) {
     console.error('获取健康记录失败:', error)
   } finally {
@@ -99,7 +97,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #909399;
+  color: #64748B;
   gap: 8px;
 }
 
@@ -130,11 +128,11 @@ onMounted(() => {
   }
 
   &.healthy::before {
-    background: #67c23a;
+    background: #16A34A;
   }
 
   &.unhealthy::before {
-    background: #f56c6c;
+    background: #DC2626;
   }
 }
 
@@ -144,7 +142,7 @@ onMounted(() => {
   align-items: flex-end;
   gap: 2px;
   padding: 8px 0;
-  border-bottom: 1px solid #ebeef5;
+  border-bottom: 1px solid #E2E8F0;
 }
 
 .chart-bar-wrapper {
@@ -163,17 +161,17 @@ onMounted(() => {
   cursor: pointer;
 
   &.healthy {
-    background: #67c23a;
+    background: #16A34A;
   }
 
   &.unhealthy {
-    background: #f56c6c;
+    background: #DC2626;
   }
 }
 
 .chart-time {
   font-size: 10px;
-  color: #909399;
+  color: #64748B;
   margin-top: 4px;
 }
 

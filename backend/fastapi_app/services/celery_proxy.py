@@ -38,26 +38,42 @@ class CeleryTaskProxy:
     ) -> AsyncResult:
         """
         发送爬虫任务
+        注意：实际使用 scheduled_crawl_with_match 任务
         """
-        from backend.crawler.tasks import run_crawl_task
+        from backend.crawler.tasks import scheduled_crawl_with_match
+        from apps.crawler.scheduler_models import CrawlSchedule
 
-        task_params = {
-            "website_code": website_code,
-            "keywords": keywords or [],
-            "max_pages": max_pages,
-            "start_date": start_date,
-            "end_date": end_date,
-            **kwargs
-        }
+        try:
+            schedule = CrawlSchedule.objects.filter(
+                website_template__code=website_code,
+                is_active=True
+            ).first()
 
-        result = run_crawl_task.apply_async(
-            kwargs=task_params,
-            priority=priority,
-        )
+            if not schedule:
+                logger.warning(f"未找到网站代码对应的采集计划: {website_code}")
+                from backend.crawler.tasks import crawl_china_gov
+                result = crawl_china_gov.apply_async(
+                    kwargs={
+                        "keywords": keywords or [],
+                        "page": 1,
+                        "page_size": max_pages * 20,
+                        "start_date": start_date,
+                        "end_date": end_date,
+                    },
+                    priority=priority,
+                )
+            else:
+                result = scheduled_crawl_with_match.apply_async(
+                    kwargs={"schedule_id": schedule.id},
+                    priority=priority,
+                )
 
-        logger.info(f"爬虫任务已发送: task_id={result.id}, website={website_code}")
+            logger.info(f"爬虫任务已发送: task_id={result.id}, website={website_code}")
+            return result
 
-        return result
+        except Exception as e:
+            logger.error(f"发送爬虫任务失败: {e}")
+            raise
 
     def send_enterprise_sync_task(
         self,
@@ -67,13 +83,13 @@ class CeleryTaskProxy:
     ) -> AsyncResult:
         """
         发送企业同步任务
+        使用 build_enterprise_vector_index 任务代替
         """
-        from backend.crawler.tasks import sync_enterprise_to_vector
+        from backend.crawler.tasks import build_enterprise_vector_index
 
-        result = sync_enterprise_to_vector.apply_async(
+        result = build_enterprise_vector_index.apply_async(
             kwargs={
                 "enterprise_id": enterprise_id,
-                "force": force,
             },
             priority=priority,
         )
@@ -89,17 +105,16 @@ class CeleryTaskProxy:
     ) -> AsyncResult:
         """
         发送文档处理任务
+        注意：process_bid_document 不存在，跳过执行
         """
-        from backend.crawler.tasks import process_bid_document
-
-        result = process_bid_document.apply_async(
-            kwargs={"document_id": document_id},
-            priority=priority,
-        )
-
-        logger.info(f"文档处理任务已发送: task_id={result.id}, document_id={document_id}")
-
-        return result
+        logger.warning(f"文档处理任务暂不支持: document_id={document_id}")
+        from celery.result import AsyncResult
+        class UnsupportedTaskResult:
+            id = f"unsupported_{document_id}"
+            status = "FAILURE"
+            ready = lambda self: True
+            result = NotImplementedError("文档处理任务暂不支持")
+        return UnsupportedTaskResult()
 
     def send_notification_task(
         self,
@@ -111,10 +126,11 @@ class CeleryTaskProxy:
     ) -> AsyncResult:
         """
         发送通知任务
+        使用 send_daily_summary 任务代替
         """
-        from backend.crawler.tasks import send_dingtalk_notification
+        from backend.crawler.tasks import send_daily_summary
 
-        result = send_dingtalk_notification.apply_async(
+        result = send_daily_summary.apply_async(
             kwargs={
                 "notification_type": notification_type,
                 "recipient": recipient,

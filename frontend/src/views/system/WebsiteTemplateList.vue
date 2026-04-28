@@ -1,25 +1,14 @@
-<template>
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<template>
   <div class="page-container">
     <div class="page-header">
       <h3 class="page-title">网站模板管理</h3>
       <div class="header-actions">
-        <el-button type="success" @click="showBatchTestDialog" :disabled="activeTemplateCount === 0">
-          <el-icon><Cpu /></el-icon>
-          批量测试
-        </el-button>
         <el-button type="primary" @click="showFormDialog(null)">
           <el-icon><Plus /></el-icon>
           新建模板
         </el-button>
       </div>
     </div>
-
-    <BatchTestDialog
-      v-model="batchTestDialogVisible"
-      :activeTemplateCount="activeTemplateCount"
-      @complete="handleBatchTestComplete"
-      @close="handleBatchTestClose"
-    />
 
     <el-card class="filter-card">
       <el-form :inline="true" :model="filterForm">
@@ -286,9 +275,9 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, Refresh, Cpu } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh } from '@element-plus/icons-vue'
 import { crawlerApi } from '@/api/crawler'
-import BatchTestDialog from './BatchTestDialog.vue'
+import { parseListResponse } from '@/utils/response-parser'
 
 const loading = ref(false)
 const tableData = ref([])
@@ -311,12 +300,6 @@ const testingId = ref(null)
 const testingUrl = ref(false)
 const testDialogVisible = ref(false)
 const testResult = ref({ success: false, message: '', data: [] })
-
-const batchTestDialogVisible = ref(false)
-
-const activeTemplateCount = computed(() => {
-  return tableData.value.filter(t => t.is_active).length
-})
 
 const currentId = ref(null)
 
@@ -350,6 +333,21 @@ const formRules = {
       validator: (rule, value, callback) => {
         if (!value) {
           callback(new Error('请输入模板代码'))
+          return
+        }
+        if (/[\u4e00-\u9fa5]/.test(value)) {
+          callback(new Error('模板代码不能包含中文字符'))
+          return
+        }
+        const forbiddenWords = ['编码', '名称', '网站', '模板', 'code', 'name', 'template']
+        const lowerValue = value.toLowerCase()
+        const foundWords = forbiddenWords.filter(word => lowerValue.includes(word.toLowerCase()))
+        if (foundWords.length > 0) {
+          callback(new Error(`模板代码不能包含提示性文字：${foundWords.join(', ')}`))
+          return
+        }
+        if (!/^[a-z0-9_-]+$/.test(value)) {
+          callback(new Error('模板代码只能包含小写字母、数字、下划线和连字符'))
           return
         }
         crawlerApi.checkTemplateCodeDuplicate(value, isEdit.value ? currentId.value : null)
@@ -390,8 +388,9 @@ const loadData = async () => {
     }
     const res = await crawlerApi.getWebsiteTemplates(params)
     if (res.code === 0 || res.code === 200) {
-      tableData.value = res.data?.results || res.data || []
-      pagination.total = res.data?.count || res.data?.length || 0
+      const { list, total } = parseListResponse(res)
+      tableData.value = list
+      pagination.total = total
     } else {
       ElMessage.error(res.message || '加载数据失败')
     }
@@ -581,37 +580,35 @@ const testTemplate = async () => {
         }
       }
 
-      const res = await crawlerApi.createWebsiteTemplate(data)
-      if (res.code === 0 || res.code === 200 || res.code === 201) {
-        if (res.data?.id) {
-          const testRes = await crawlerApi.testWebsiteTemplate(res.data.id)
-          if (testRes.code === 0 || testRes.code === 200) {
-            testResult.value = {
-              success: true,
-              message: '测试成功，模板可正常使用',
-              data: testRes.data?.sample_data || []
-            }
-            await crawlerApi.deleteWebsiteTemplate(res.data.id)
-          } else {
-            testResult.value = {
-              success: false,
-              message: '测试失败: ' + (testRes.message || '未知错误'),
-              data: []
-            }
-            await crawlerApi.deleteWebsiteTemplate(res.data.id)
+      if (isEdit.value && currentId.value) {
+        const testRes = await crawlerApi.testWebsiteTemplate(currentId.value)
+        if (testRes.code === 0 || testRes.code === 200) {
+          testResult.value = {
+            success: true,
+            message: '测试成功，模板可正常使用',
+            data: testRes.data?.sample_data || []
           }
         } else {
           testResult.value = {
-            success: true,
-            message: '配置保存成功',
+            success: false,
+            message: '测试失败: ' + (testRes.message || '未知错误'),
             data: []
           }
         }
       } else {
-        testResult.value = {
-          success: false,
-          message: res.message || '测试失败',
-          data: []
+        const testRes = await crawlerApi.testWebsiteTemplateConfig(data)
+        if (testRes.code === 0 || testRes.code === 200) {
+          testResult.value = {
+            success: true,
+            message: '测试成功，配置可正常使用',
+            data: testRes.data?.sample_data || []
+          }
+        } else {
+          testResult.value = {
+            success: false,
+            message: '测试失败: ' + (testRes.message || '未知错误'),
+            data: []
+          }
         }
       }
     } catch (error) {
@@ -771,19 +768,6 @@ const handleSubmit = async () => {
 onMounted(() => {
   loadData()
 })
-
-const showBatchTestDialog = () => {
-  batchTestDialogVisible.value = true
-}
-
-const handleBatchTestComplete = (summary) => {
-  console.log('Batch test completed:', summary)
-  loadData()
-}
-
-const handleBatchTestClose = () => {
-  batchTestDialogVisible.value = false
-}
 </script>
 
 <style scoped>
@@ -806,7 +790,7 @@ const handleBatchTestClose = () => {
 
 .test-result-list h4 {
   margin-bottom: 10px;
-  color: #606266;
+  color: #334155;
 }
 
 .test-item {
@@ -820,6 +804,6 @@ const handleBatchTestClose = () => {
 
 .test-item-url {
   font-size: 12px;
-  color: #909399;
+  color: #64748B;
 }
 </style>

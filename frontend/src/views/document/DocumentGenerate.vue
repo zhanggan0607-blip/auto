@@ -1,4 +1,4 @@
-<template>
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<template>
   <div class="page-container">
     <div class="page-header">
       <h3 class="page-title">生成标书</h3>
@@ -168,6 +168,8 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { documentApi } from '@/api/document'
+import { parseListResponse } from '@/utils/response-parser'
+import { useFormDraft } from '@/composables/useFormDraft'
 
 const route = useRoute()
 
@@ -185,6 +187,17 @@ const referenceLoading = ref(false)
 const formData = reactive({
   name: '',
   variables: {}
+})
+
+const { clearDraft } = useFormDraft(formData, {
+  key: 'document:generate',
+  context: () => ({ tenderId: tenderId.value, templateId: selectedTemplate.value?.id }),
+  onRestored: (data) => {
+    if (data.templateId) {
+      const tmpl = templateList.value.find(t => t.id === data.templateId)
+      if (tmpl) selectedTemplate.value = tmpl
+    }
+  }
 })
 
 const generateResult = ref({
@@ -210,7 +223,8 @@ const canNext = computed(() => {
 const fetchTemplates = async () => {
   try {
     const res = await documentApi.getTemplates()
-    templateList.value = res.data?.list || []
+    const { list } = parseListResponse(res)
+    templateList.value = list
   } catch (error) {
     console.error('获取模板列表失败:', error)
   }
@@ -228,7 +242,8 @@ const searchReferenceDocs = async () => {
       query: referenceSearch.value,
       limit: 20
     })
-    referenceDocList.value = res.data?.list || []
+    const { list } = parseListResponse(res)
+    referenceDocList.value = list
   } catch (error) {
     console.error('搜索参考文档失败:', error)
     ElMessage.error('搜索失败')
@@ -301,6 +316,7 @@ const generateDocument = async () => {
       success: true,
       data: res.data
     }
+    clearDraft()
   } catch (error) {
     generateResult.value = {
       success: false,
@@ -340,7 +356,7 @@ onMounted(() => {
 .step-panel {
   min-height: 300px;
   padding: 20px;
-  background-color: #f5f7fa;
+  background-color: #F1F5F9;
   border-radius: 4px;
 }
 
@@ -376,12 +392,12 @@ onMounted(() => {
     h4 {
       margin-bottom: 15px;
       padding-bottom: 10px;
-      border-bottom: 1px solid #ebeef5;
+      border-bottom: 1px solid #E2E8F0;
     }
   }
   
   .empty-tip {
-    color: #909399;
+    color: #64748B;
     text-align: center;
     padding: 40px 0;
   }
@@ -395,7 +411,7 @@ onMounted(() => {
       margin-bottom: 8px;
       background: #fff;
       border-radius: 4px;
-      border: 1px solid #ebeef5;
+      border: 1px solid #E2E8F0;
       
       .doc-info {
         display: flex;
@@ -414,6 +430,6 @@ onMounted(() => {
 }
 
 .reference-summary {
-  color: #606266;
+  color: #334155;
 }
 </style>

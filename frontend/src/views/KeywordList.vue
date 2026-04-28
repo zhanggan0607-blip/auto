@@ -69,6 +69,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { tenderApi } from '@/api/tender'
+import { parseListResponse } from '@/utils/response-parser'
 
 const activeTab = ref('all')
 const loading = ref(false)
@@ -102,7 +103,8 @@ const fetchKeywords = async () => {
       params.category = activeTab.value
     }
     const res = await tenderApi.getKeywords(params)
-    keywordList.value = res.data?.list || []
+    const { list } = parseListResponse(res)
+    keywordList.value = list
   } catch (error) {
     console.error('获取关键词列表失败:', error)
   } finally {

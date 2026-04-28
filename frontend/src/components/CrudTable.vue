@@ -71,7 +71,7 @@
         :page-sizes="pageSizes"
         :layout="paginationLayout"
         :background="true"
-        small
+        size="small"
         @size-change="handleSizeChange"
         @current-change="handlePageChange"
       />
@@ -250,13 +250,13 @@ const handleSizeChange = (val) => {
   .add-btn {
     background: var(--brand-gradient);
     border: none;
-    box-shadow: 0 2px 6px rgba(0, 102, 204, 0.2);
+    box-shadow: 0 2px 6px rgba(26, 86, 219, 0.2);
     transition: all var(--transition-base);
 
     &:hover {
       background: var(--brand-gradient-hover);
       transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(0, 102, 204, 0.3);
+      box-shadow: 0 4px 12px rgba(26, 86, 219, 0.3);
     }
   }
 }

@@ -118,6 +118,33 @@ const STATUS_TYPE_MAP = {
     active: 'success',
     paused: 'warning',
     deleted: 'info'
+  },
+  service_health: {
+    healthy: 'success',
+    degraded: 'warning',
+    unhealthy: 'danger',
+    restarting: 'warning',
+    offline: 'info',
+    unknown: 'info'
+  },
+  workflow_status: {
+    pending: 'info',
+    running: 'primary',
+    completed: 'success',
+    failed: 'danger',
+    waiting_review: 'warning',
+    cancelled: 'info'
+  },
+  action_log_status: {
+    success: 'success',
+    failed: 'danger',
+    started: 'warning',
+    skipped: 'info'
+  },
+  certificate_status: {
+    valid: 'success',
+    expiring: 'warning',
+    expired: 'danger'
   }
 }
 

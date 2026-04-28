@@ -1,4 +1,4 @@
-<template>
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<template>
   <div class="page-container">
     <PageHeader title="定时采集" subtitle="配置定时任务自动采集招标信息">
       <template #actions>
@@ -110,8 +110,8 @@
           >
             <template #suffix>
               <el-icon v-if="nameChecking"><Loading /></el-icon>
-              <el-icon v-else-if="nameDuplicate === true" color="#F56C6C"><Close /></el-icon>
-              <el-icon v-else-if="nameDuplicate === false && form.name" color="#67C23A"><Check /></el-icon>
+              <el-icon v-else-if="nameDuplicate === true" color="#DC2626"><Close /></el-icon>
+              <el-icon v-else-if="nameDuplicate === false && form.name" color="#16A34A"><Check /></el-icon>
             </template>
           </el-input>
           <div v-if="nameDuplicate === true" class="name-error">该计划名称已被使用</div>
@@ -272,7 +272,7 @@
         </el-form-item>
 
         <el-form-item label="最大采集页数">
-          <el-input-number v-model="form.max_pages" :min="1" :max="100" />
+          <el-input-number v-model="form.max_pages" :min="1" :max="200" />
         </el-form-item>
 
         <el-form-item label="采集模式">
@@ -420,6 +420,7 @@ import { tenderApi } from '@/api/tender'
 import { enterpriseApi } from '@/api/enterprise'
 import { regionData } from '@/utils/regions'
 import { formatDate, formatDateTime } from '@/utils/date'
+import { parseListResponse, parsePagination } from '@/utils/response-parser'
 
 const WEBSITE_TYPE_MAP = {
   'government': '政府采购网',
@@ -628,14 +629,14 @@ const executeNow = async (row) => {
     if (res.data?.task_id) {
       currentTaskId.value = res.data.task_id
       progressVisible.value = true
-      ElMessage.info('采集任务已启动，请在进度面板中查看')
+      ElMessage.success('采集任务已启动')
     } else {
       ElMessage.success('任务已提交执行')
     }
-    row.executing = false
   } catch (error) {
     console.error('执行失败:', error)
-    ElMessage.error('执行失败')
+    ElMessage.error(error.message || '执行失败，请稍后重试')
+  } finally {
     row.executing = false
   }
 }
@@ -664,19 +665,10 @@ const fetchSchedules = async () => {
       page: pagination.page,
       page_size: pagination.pageSize
     })
-    if (res.data && res.data.list) {
-      schedules.value = res.data.list
-      pagination.total = res.data.pagination?.total || 0
-    } else if (res.data && res.data.results) {
-      schedules.value = res.data.results
-      pagination.total = res.data.count || 0
-    } else if (Array.isArray(res.data)) {
-      schedules.value = res.data
-      pagination.total = res.data.length
-    } else {
-      schedules.value = []
-      pagination.total = 0
-    }
+    const { list, total } = parseListResponse(res)
+    const pg = parsePagination(res)
+    schedules.value = list
+    pagination.total = pg.total || total || 0
   } catch (error) {
     console.error('获取采集计划失败:', error)
     ElMessage.error('获取采集计划失败')
@@ -688,15 +680,8 @@ const fetchSchedules = async () => {
 const fetchTemplates = async () => {
   try {
     const res = await crawlerApi.getWebsiteTemplates({ page_size: 100 })
-    if (res.data && res.data.list) {
-      templates.value = res.data.list
-    } else if (res.data && res.data.results) {
-      templates.value = res.data.results
-    } else if (Array.isArray(res.data)) {
-      templates.value = res.data
-    } else {
-      templates.value = []
-    }
+    const { list } = parseListResponse(res)
+    templates.value = list
   } catch (error) {
     console.error('获取网站模板失败:', error)
   }
@@ -706,13 +691,8 @@ const fetchKeywords = async () => {
   keywordsLoading.value = true
   try {
     const res = await tenderApi.getKeywords({})
-    if (res.data && res.data.list) {
-      availableKeywords.value = res.data.list
-    } else if (Array.isArray(res.data)) {
-      availableKeywords.value = res.data
-    } else {
-      availableKeywords.value = []
-    }
+    const { list } = parseListResponse(res)
+    availableKeywords.value = list
   } catch (error) {
     console.error('获取关键词列表失败:', error)
   } finally {
@@ -724,7 +704,8 @@ const loadEnterprises = async () => {
   enterpriseLoading.value = true
   try {
     const res = await enterpriseApi.getEnterprises({ page_size: 100 })
-    enterpriseList.value = res?.data?.results || res?.results || res?.data?.list || res?.list || res?.data || []
+    const { list } = parseListResponse(res)
+    enterpriseList.value = list
   } catch (error) {
     console.error('获取企业列表失败:', error)
     enterpriseList.value = []
@@ -984,7 +965,8 @@ const viewLogs = async (row) => {
   logsLoading.value = true
   try {
     const res = await crawlerApi.getCrawlScheduleLogs(row.id)
-    logs.value = res.data?.list || res.data || []
+    const { list } = parseListResponse(res)
+    logs.value = list
   } catch (error) {
     console.error('获取日志失败:', error)
     ElMessage.error('获取日志失败')
@@ -1003,7 +985,7 @@ onMounted(() => {
 .page-container {
   padding: 16px;
   min-height: calc(100vh - 60px);
-  background-color: #f5f7fa;
+  background-color: #F1F5F9;
 }
 
 .content-card {
@@ -1018,7 +1000,7 @@ onMounted(() => {
 
 .form-tip {
   margin-left: 10px;
-  color: #909399;
+  color: #64748B;
   font-size: 12px;
 }
 
@@ -1052,7 +1034,7 @@ onMounted(() => {
 }
 
 .name-error {
-  color: #F56C6C;
+  color: #DC2626;
   font-size: 12px;
   margin-top: 4px;
   line-height: 1.4;

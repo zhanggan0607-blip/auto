@@ -204,23 +204,6 @@ class AISearchTaskCreateSerializer(serializers.Serializer):
     document_types = serializers.CharField(max_length=200, required=False, allow_blank=True, help_text='目标文档类型（多个用逗号分隔）')
     industries = serializers.CharField(max_length=300, required=False, allow_blank=True, help_text='目标行业（多个用逗号分隔）')
     max_results = serializers.IntegerField(default=20, min_value=5, max_value=100, help_text='最大结果数')
-
-
-class DocumentSearchLogSerializer(serializers.ModelSerializer):
-    """
-    文档搜索日志序列化器
-    """
-    user_name = serializers.CharField(source='user.username', read_only=True)
-
-    class Meta:
-        model = DocumentSearchLog
-        fields = [
-            'id', 'query_text', 'search_type',
-            'result_count', 'clicked_documents',
-            'user', 'user_name', 'session_id', 'created_at'
-        ]
-
-
 class BatchUploadSerializer(serializers.Serializer):
     """
     批量上传序列化器

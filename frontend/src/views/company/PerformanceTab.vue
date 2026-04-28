@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <CrudTable
     :data="list"
     :loading="loading"
@@ -46,6 +46,6 @@ const handleDelete = (row) => emit('delete', row)
 
 <style scoped>
 :deep(.info-value.capital) {
-  color: #67c23a;
+  color: #16A34A;
 }
 </style>

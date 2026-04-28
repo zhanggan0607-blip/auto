@@ -6,7 +6,7 @@ import request from '@/utils/request'
 
 const BASE_URL = '/v1/constants'
 
-export default {
+const constantsApi = {
   /**
    * 获取所有状态常量
    */
@@ -71,3 +71,6 @@ export default {
     return this.getConstantsByType('priority')
   }
 }
+
+export { constantsApi }
+export default constantsApi

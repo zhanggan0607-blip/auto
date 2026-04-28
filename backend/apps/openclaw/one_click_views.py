@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
 
-from core.viewsets import APIResponseMixin
+from common.views.base import APIResponseMixin
 from services.one_click_automation import one_click_automation_service
 from utils.permissions.enterprise import verify_enterprise_ownership
 

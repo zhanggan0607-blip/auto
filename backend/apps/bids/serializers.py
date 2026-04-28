@@ -9,11 +9,11 @@ class BidRecordListSerializer(serializers.ModelSerializer):
     """
     投标记录列表序列化器
     """
+    tender_id = serializers.IntegerField(source='tender.id', read_only=True)
     tender_title = serializers.CharField(source='tender.title', read_only=True)
     tender_project_code = serializers.CharField(source='tender.project_code', read_only=True)
     tender_region = serializers.CharField(source='tender.region', read_only=True)
     tender_deadline = serializers.DateField(source='tender.deadline_date', read_only=True)
-    tender_id = serializers.IntegerField(source='tender.id', read_only=True)
     bid_manager_name = serializers.CharField(source='bid_manager.username', read_only=True)
     bid_manager_id = serializers.IntegerField(source='bid_manager.id', read_only=True)
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
@@ -49,8 +49,14 @@ class BidRecordDetailSerializer(serializers.ModelSerializer):
     """
     投标记录详情序列化器
     """
+    tender_id = serializers.IntegerField(source='tender.id', read_only=True)
     tender_title = serializers.CharField(source='tender.title', read_only=True)
+    tender_project_code = serializers.CharField(source='tender.project_code', read_only=True)
+    tender_region = serializers.CharField(source='tender.region', read_only=True)
+    tender_deadline = serializers.DateField(source='tender.deadline_date', read_only=True)
+    bid_manager_id = serializers.IntegerField(source='bid_manager.id', read_only=True)
     bid_manager_name = serializers.CharField(source='bid_manager.username', read_only=True)
+    team_member_ids = serializers.SerializerMethodField()
     team_member_names = serializers.SerializerMethodField()
     documents = serializers.SerializerMethodField()
     result = serializers.SerializerMethodField()
@@ -58,11 +64,16 @@ class BidRecordDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = BidRecord
         fields = [
-            'id', 'tender', 'tender_title', 'bid_code', 'bid_price', 'bid_date',
-            'status', 'bid_documents', 'documents', 'bid_manager', 'bid_manager_name',
-            'team_members', 'team_member_names', 'notes', 'win_probability',
-            'competitor_count', 'result', 'created_at', 'updated_at'
+            'id', 'tender_id', 'tender_title', 'tender_project_code', 'tender_region',
+            'tender_deadline', 'bid_code', 'bid_price', 'bid_date',
+            'status', 'bid_documents', 'documents',
+            'bid_manager_id', 'bid_manager_name',
+            'team_member_ids', 'team_member_names', 'notes',
+            'win_probability', 'competitor_count', 'result', 'created_at', 'updated_at'
         ]
+
+    def get_team_member_ids(self, obj):
+        return list(obj.team_members.values_list('id', flat=True))
 
     def get_team_member_names(self, obj):
         return [member.username for member in obj.team_members.all()]

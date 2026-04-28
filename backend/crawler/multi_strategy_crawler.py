@@ -1,9 +1,14 @@
 """
 爬虫模块 - 多级降级策略与监控系统
 实现采集任务的自动降级、监控和动态调优
+
+.. deprecated::
+    请使用 `common.crawler.common_crawler.CommonCrawler` 替代
+    此模块将在未来版本中移除
 """
 import time
 import random
+import asyncio
 import logging
 import hashlib
 from typing import List, Dict, Any, Optional, Callable
@@ -579,6 +584,7 @@ class MultiStrategyCrawler:
             options.add_argument(f'--proxy-server={proxy}')
 
         driver = webdriver.Chrome(options=options)
+        driver.set_page_load_timeout(60)
 
         try:
             driver.get(url)
@@ -598,12 +604,17 @@ class MultiStrategyCrawler:
                 'strategy': 'selenium_stealth'
             }
 
+        except Exception as e:
+            self.monitor.record_request(
+                url, CrawlStrategy.SELENIUM_STEALTH.value, ResponseStatus.FAILURE, time.time() - start_time
+            )
+            raise
+
         finally:
             driver.quit()
 
     def _crawl_by_pyppeteer_stealth(self, url: str, proxy: str = None, **kwargs) -> Dict[str, Any]:
         """Pyppeteer反检测策略"""
-        import asyncio
         from crawler.stealth_crawler import StealthCrawler
 
         start_time = time.time()
@@ -614,12 +625,11 @@ class MultiStrategyCrawler:
             return result
 
         try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-
-        result = loop.run_until_complete(_crawl())
+            result = loop.run_until_complete(_crawl())
+        finally:
+            loop.close()
         response_time = time.time() - start_time
 
         if result.success:

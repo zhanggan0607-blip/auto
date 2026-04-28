@@ -211,8 +211,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch } from 'vue'
+import { ref, reactive, watch, computed } from 'vue'
 import { regionData, getRegionValue, parseRegionValue } from '@/utils/regions'
+import { useFormDraft } from '@/composables/useFormDraft'
 
 const props = defineProps({
   visible: {
@@ -269,6 +270,24 @@ const defaultForm = {
 
 const form = reactive({ ...defaultForm })
 
+const draftKey = computed(() => {
+  if (props.isEdit && props.enterprise?.id) {
+    return `enterprise:edit:${props.enterprise.id}`
+  }
+  return 'enterprise:create'
+})
+
+const { clearDraft } = useFormDraft(form, {
+  key: draftKey,
+  sensitiveFields: ['bank_account', 'credit_code'],
+  context: () => ({ isEdit: props.isEdit, enterpriseId: props.enterprise?.id }),
+  onRestored: (data) => {
+    if (data.province || data.city || data.district) {
+      regionValue.value = getRegionValue(data.province, data.city, data.district)
+    }
+  }
+})
+
 watch(() => props.enterprise, (newVal) => {
   if (newVal) {
     Object.keys(defaultForm).forEach(key => {
@@ -318,7 +337,7 @@ const handleSave = async () => {
       insured_count: form.insured_count ? Number(form.insured_count) : null,
       business_scope: form.business_scope || null,
       auto_bid_enabled: form.auto_bid_enabled,
-      auto_bid_threshold: form.auto_bid_threshold || 60,
+      auto_bid_threshold: form.auto_bid_threshold ?? 60,
       auto_upload_enabled: form.auto_upload_enabled,
       auto_bid_keywords: Array.isArray(form.auto_bid_keywords) ? form.auto_bid_keywords : [],
       notification_channels: Array.isArray(form.notification_channels) ? form.notification_channels : [],
@@ -332,6 +351,7 @@ const handleSave = async () => {
       submitData.id = form.id
     }
 
+    clearDraft()
     emit('save', submitData)
   } finally {
     saving.value = false

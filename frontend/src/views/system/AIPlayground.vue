@@ -19,7 +19,7 @@
           <template #header>
             <div class="chat-header">
               <div class="model-badge">
-                <el-tag type="info" size="small">gemma3:1b</el-tag>
+                <el-tag type="info" size="small">投标精灵</el-tag>
               </div>
             </div>
           </template>
@@ -33,7 +33,7 @@
                 <div class="message-content">
                   <div class="message-header">
                     <span class="sender-name">{{ msg.role === 'user' ? '你' : currentProviderName }}</span>
-                    <span class="message-time" v-if="msg.timestamp">{{ formatTime(msg.timestamp) }}</span>
+                    <span class="message-time" v-if="msg.timestamp">{{ formatDateTime(msg.timestamp) }}</span>
                   </div>
                   <div class="message-text" v-html="formatMessage(msg.content)" />
                   <div class="message-meta" v-if="msg.meta">
@@ -157,7 +157,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="created_at" label="时间" width="160">
-          <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+          <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
         </el-table-column>
       </el-table>
       <el-pagination
@@ -195,9 +195,11 @@
 import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ChatDotRound, Promotion, Clock, Connection } from '@element-plus/icons-vue'
+import DOMPurify from 'dompurify'
 import { modelApi } from '@/api/model'
 import { PageHeader } from '@/components'
 import { useUserStore } from '@/store/user'
+import { formatDateTime } from '@/utils/date'
 
 const DEFAULT_MODEL = 'gemma3:1b'
 const userStore = useUserStore()
@@ -309,6 +311,7 @@ const handleSend = async () => {
 }
 
 const streamChat = async (message, history) => {
+  let fullContent = ''
   try {
     const token = userStore.token || document.cookie.match(/access_token=([^;]+)/)?.[1]
     if (!token) {
@@ -340,7 +343,6 @@ const streamChat = async (message, history) => {
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
-    let fullContent = ''
 
     // eslint-disable-next-line no-constant-condition
     while (true) {
@@ -494,17 +496,10 @@ const testAllProviders = async () => {
 
 const formatMessage = (content) => {
   if (!content) return ''
-  return content.replace(/\n/g, '<br>')
-}
-
-const formatTime = (timeStr) => {
-  if (!timeStr) return ''
-  const date = new Date(timeStr)
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
+  return DOMPurify.sanitize(content, {
+    ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'code', 'pre', 'br', 'p', 'span', 'div', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'hr', 'a'],
+    ALLOWED_ATTR: ['href', 'title', 'class'],
+    ALLOW_DATA_ATTR: false
   })
 }
 

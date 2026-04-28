@@ -1,4 +1,4 @@
-<template>
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<template>
   <div class="one-click-launch">
     <div class="launch-container">
       <div class="launch-header">
@@ -129,7 +129,7 @@
             <template #header>
               <div class="card-header">
                 <span>执行进度</span>
-                <el-tag v-if="currentWorkflow" :type="getStatusType(currentWorkflow.status)" size="small">
+                <el-tag v-if="currentWorkflow" :type="getStatusType('workflow_status', 'workflow_status', currentWorkflow.status)" size="small">
                   {{ getStatusText(currentWorkflow.status) }}
                 </el-tag>
               </div>
@@ -182,7 +182,7 @@
                 :key="index"
                 :class="['log-item', `log-${log.level}`]"
               >
-                <span class="log-time">{{ formatTime(log.timestamp) }}</span>
+                <span class="log-time">{{ formatDateTime(log.timestamp) }}</span>
                 <span class="log-message">{{ log.message }}</span>
               </div>
             </div>
@@ -348,7 +348,7 @@
               <div class="fix-stats" v-if="fixRecords.length > 0">
                 <el-divider>修复记录</el-divider>
                 <div v-for="record in fixRecords.slice(-3)" :key="record.id" class="fix-record">
-                  <span class="fix-time">{{ formatTime(record.time) }}</span>
+                  <span class="fix-time">{{ formatDateTime(record.time) }}</span>
                   <span class="fix-result">{{ record.result }}</span>
                 </div>
               </div>
@@ -410,7 +410,7 @@
                 <div v-for="fail in recentFailures.slice(0, 3)" :key="fail.id" class="failure-item">
                   <div class="failure-info">
                     <el-tag size="small" type="danger">{{ fail.stage }}</el-tag>
-                    <span class="failure-time">{{ formatTime(fail.created_at) }}</span>
+                    <span class="failure-time">{{ formatDateTime(fail.created_at) }}</span>
                   </div>
                   <div class="failure-msg">{{ fail.error_message }}</div>
                 </div>
@@ -429,20 +429,20 @@
             <div class="health-content">
               <el-descriptions :column="1" border size="small">
                 <el-descriptions-item label="数据库">
-                  <el-icon v-if="systemHealth.database"><Check color="#67C23A"/></el-icon>
-                  <el-icon v-else><Close color="#F56C6C"/></el-icon>
+                  <el-icon v-if="systemHealth.database"><Check color="#16A34A"/></el-icon>
+                  <el-icon v-else><Close color="#DC2626"/></el-icon>
                 </el-descriptions-item>
                 <el-descriptions-item label="缓存">
-                  <el-icon v-if="systemHealth.cache"><Check color="#67C23A"/></el-icon>
-                  <el-icon v-else><Close color="#F56C6C"/></el-icon>
+                  <el-icon v-if="systemHealth.cache"><Check color="#16A34A"/></el-icon>
+                  <el-icon v-else><Close color="#DC2626"/></el-icon>
                 </el-descriptions-item>
                 <el-descriptions-item label="向量库">
-                  <el-icon v-if="systemHealth.vector_db"><Check color="#67C23A"/></el-icon>
-                  <el-icon v-else><Close color="#F56C6C"/></el-icon>
+                  <el-icon v-if="systemHealth.vector_db"><Check color="#16A34A"/></el-icon>
+                  <el-icon v-else><Close color="#DC2626"/></el-icon>
                 </el-descriptions-item>
                 <el-descriptions-item label="LLM服务">
-                  <el-icon v-if="systemHealth.llm"><Check color="#67C23A"/></el-icon>
-                  <el-icon v-else><Close color="#F56C6C"/></el-icon>
+                  <el-icon v-if="systemHealth.llm"><Check color="#16A34A"/></el-icon>
+                  <el-icon v-else><Close color="#DC2626"/></el-icon>
                 </el-descriptions-item>
               </el-descriptions>
               <div class="health-issues" v-if="healthIssues.length > 0">
@@ -495,12 +495,12 @@
               <div v-for="item in executionHistory" :key="item.id" class="history-item">
                 <div class="history-info">
                   <span class="history-enterprise">{{ item.enterprise_name }}</span>
-                  <el-tag :type="getStatusType(item.status)" size="small">
+                  <el-tag :type="getStatusType('workflow_status', 'workflow_status', item.status)" size="small">
                     {{ getStatusText(item.status) }}
                   </el-tag>
                 </div>
                 <div class="history-meta">
-                  <span>{{ formatTime(item.created_at) }}</span>
+                  <span>{{ formatDateTime(item.created_at) }}</span>
                   <span v-if="item.tender_count">采集 {{ item.tender_count }} 条</span>
                 </div>
               </div>
@@ -536,7 +536,7 @@
       <el-descriptions :column="2" border v-if="currentWorkflow">
         <el-descriptions-item label="工作流ID">{{ currentWorkflow.workflow_id }}</el-descriptions-item>
         <el-descriptions-item label="状态">
-          <el-tag :type="getStatusType(currentWorkflow.status)">
+          <el-tag :type="getStatusType('workflow_status', 'workflow_status', currentWorkflow.status)">
             {{ getStatusText(currentWorkflow.status) }}
           </el-tag>
         </el-descriptions-item>
@@ -546,8 +546,8 @@
             {{ currentWorkflow.bid_score || '-' }}分
           </span>
         </el-descriptions-item>
-        <el-descriptions-item label="创建时间">{{ formatTime(currentWorkflow.created_at) }}</el-descriptions-item>
-        <el-descriptions-item label="完成时间">{{ formatTime(currentWorkflow.completed_at) }}</el-descriptions-item>
+        <el-descriptions-item label="创建时间">{{ formatDateTime(currentWorkflow.created_at) }}</el-descriptions-item>
+        <el-descriptions-item label="完成时间">{{ formatDateTime(currentWorkflow.completed_at) }}</el-descriptions-item>
       </el-descriptions>
       <template #footer>
         <el-button @click="showWorkflowDetail = false">关闭</el-button>
@@ -561,6 +561,10 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { VideoPlay, Plus, Check, Loading, Document, Refresh, InfoFilled, Warning, Close, Right } from '@element-plus/icons-vue'
 import request from '@/utils/request'
+import { isSuccess, parseListResponse } from '@/utils/response-parser'
+import { useFormDraft } from '@/composables/useFormDraft'
+import { formatDateTime } from '@/utils/date'
+import { getStatusType } from '@/store/constants'
 
 const enterpriseId = ref(null)
 const selectedEnterprise = ref(null)
@@ -652,6 +656,16 @@ const llmTestResult = ref(null)
 const testingConnection = ref(false)
 const savingLLM = ref(false)
 
+const { clearDraft: clearEnterpriseDraft } = useFormDraft(enterpriseForm, {
+  key: 'automation:launch:enterprise',
+  promptMessage: '检测到您有未保存的企业信息，是否恢复？'
+})
+
+const { clearDraft: clearLLMDraft } = useFormDraft(llmConfig, {
+  key: 'automation:launch:llm',
+  promptOnRestore: false
+})
+
 const canStart = computed(() => {
   return selectedEnterprise.value && !isRunning.value
 })
@@ -669,9 +683,8 @@ const currentStepIndex = computed(() => {
 const fetchEnterprises = async () => {
   try {
     const res = await request.get('/v1/enterprise/enterprises/')
-    if (res.data?.success) {
-      enterpriseList.value = res.data.data?.list || res.data.data?.results || []
-    }
+    const { list } = parseListResponse(res)
+    enterpriseList.value = list
   } catch (error) {
     console.error('获取企业列表失败:', error)
   }
@@ -684,27 +697,25 @@ const onEnterpriseChange = (val) => {
 const fetchLLMConfig = async () => {
   try {
     const [providersRes, agentRes] = await Promise.all([
-      request.get('/v1/openclaw/providers/'),
-      request.get('/v1/openclaw/agent-configs/')
+      request.get('/v1/openclaw/llm-providers/'),
+      request.get('/v1/openclaw/agent-model-configs/')
     ])
 
-    if (providersRes.data?.success) {
-      llmProviders.value = providersRes.data.data || []
+    if (isSuccess(providersRes)) {
+      llmProviders.value = providersRes.data || []
     }
 
-    if (agentRes.data?.success) {
-      const agents = agentRes.data.data?.list || agentRes.data.data?.results || []
-      if (agents.length > 0) {
-        const agent = agents[0]
-        llmConfig.agent_type = agent.agent_type
-        llmConfig.temperature = agent.temperature || 0.7
-        llmConfig.model_id = agent.chat_model || agent.reasoning_model
-      }
+    const { list: agents } = parseListResponse(agentRes)
+    if (agents && agents.length > 0) {
+      const agent = agents[0]
+      llmConfig.agent_type = agent.agent_type
+      llmConfig.temperature = agent.temperature || 0.7
+      llmConfig.model_id = agent.chat_model || agent.reasoning_model
     }
 
-    const defaultProviderRes = await request.get('/v1/openclaw/providers/default/')
-    if (defaultProviderRes.data?.success) {
-      const provider = defaultProviderRes.data.data
+    const defaultProviderRes = await request.get('/v1/openclaw/llm-providers/default/')
+    if (isSuccess(defaultProviderRes)) {
+      const provider = defaultProviderRes.data
       if (provider) {
         llmConfig.provider_id = provider.id
         await fetchModelsByProvider(provider.id)
@@ -724,9 +735,9 @@ const onProviderChange = async (providerId) => {
 const fetchModelsByProvider = async (providerId) => {
   if (!providerId) return
   try {
-    const res = await request.get(`/v1/openclaw/providers/${providerId}/models/`)
-    if (res.data?.success) {
-      availableModels.value = res.data.data || []
+    const res = await request.get(`/v1/openclaw/llm-providers/${providerId}/models/`)
+    if (isSuccess(res)) {
+      availableModels.value = res.data || []
     }
   } catch (error) {
     console.error('获取模型列表失败:', error)
@@ -743,21 +754,21 @@ const handleTestConnection = async () => {
   llmTestResult.value = null
 
   try {
-    const res = await request.post('/v1/openclaw/providers/test_connection/', {
+    const res = await request.post('/v1/openclaw/llm-providers/test_connection/', {
       provider_id: llmConfig.provider_id,
       model_id: llmConfig.model_id
     })
 
-    if (res.data?.success) {
+    if (isSuccess(res)) {
       llmTestResult.value = {
         success: true,
-        message: `连接成功: ${res.data.data?.response || '模型响应正常'}`
+        message: `连接成功: ${res.data?.response || '模型响应正常'}`
       }
       ElMessage.success('连接测试成功')
     } else {
       llmTestResult.value = {
         success: false,
-        message: res.data?.message || '连接失败'
+        message: res.message || '连接失败'
       }
     }
   } catch (error) {
@@ -773,7 +784,7 @@ const handleTestConnection = async () => {
 const handleSaveLLMConfig = async () => {
   savingLLM.value = true
   try {
-    const res = await request.post('/v1/openclaw/agent-configs/batch_update/', {
+    const res = await request.post('/v1/openclaw/agent-model-configs/batch_update/', {
       configs: [{
         agent_type: llmConfig.agent_type,
         chat_model: llmConfig.model_id,
@@ -782,8 +793,9 @@ const handleSaveLLMConfig = async () => {
       }]
     })
 
-    if (res.data?.success) {
+    if (isSuccess(res)) {
       ElMessage.success('LLM配置已保存')
+      clearLLMDraft()
     }
   } catch (error) {
     ElMessage.error('保存失败')
@@ -800,12 +812,13 @@ const handleQuickCreate = async () => {
   creating.value = true
   try {
     const res = await request.post('/v1/openclaw/one-click/enterprise/setup/', enterpriseForm)
-    if (res.data?.success) {
+    if (isSuccess(res)) {
       ElMessage.success('企业创建成功')
+      clearEnterpriseDraft()
       showQuickCreate.value = false
       await fetchEnterprises()
-      enterpriseId.value = res.data.data.enterprise_id
-      selectedEnterprise.value = enterpriseList.value.find(e => e.id === res.data.data.enterprise_id)
+      enterpriseId.value = res.data.enterprise_id
+      selectedEnterprise.value = enterpriseList.value.find(e => e.id === res.data.enterprise_id)
     }
   } catch (error) {
     ElMessage.error('创建失败')
@@ -817,9 +830,9 @@ const handleQuickCreate = async () => {
 const checkSystemHealth = async () => {
   try {
     const res = await request.get('/v1/openclaw/scheduler/health/')
-    if (res.data?.success) {
-      Object.assign(systemStatus, res.data.data)
-      systemStatus.overall = res.data.data.overall || 'healthy'
+    if (isSuccess(res)) {
+      Object.assign(systemStatus, res.data)
+      systemStatus.overall = res.data.overall || 'healthy'
     }
   } catch (error) {
     console.error('检查系统状态失败:', error)
@@ -829,32 +842,9 @@ const checkSystemHealth = async () => {
 
 const fetchErrorStatistics = async () => {
   try {
-    const res = await request.get('/v1/openclaw/error-knowledge/stats/')
-    if (res.data?.success) {
-      const data = res.data.data
-      errorStats.total_failures = data.total_records || 0
-      errorStats.solved = data.solved_records || 0
-      errorStats.unsolved = data.unsolved_records || 0
-      errorStats.solve_rate = data.solve_rate || 0
-    }
-
-    const frequentRes = await request.get('/v1/openclaw/error-knowledge/frequent/')
-    if (frequentRes.data?.success) {
-      frequentErrors.value = frequentRes.data.data || []
-    }
-
-    const recentRes = await request.get('/v1/openclaw/error-knowledge/recent/')
-    if (recentRes.data?.success) {
-      recentFailures.value = recentRes.data.data || []
-    }
-  } catch (error) {
-    console.error('获取错误统计失败:', error)
-  }
-
-  try {
-    const healthRes = await request.get('/v1/openclaw/optimizer/health/')
-    if (healthRes.data?.success) {
-      const data = healthRes.data.data
+    const res = await request.get('/v1/system/health/')
+    if (isSuccess(res)) {
+      const data = res.data || {}
       systemHealth.database = data.services?.database || false
       systemHealth.cache = data.services?.cache || false
       systemHealth.vector_db = data.services?.vector_db || false
@@ -862,19 +852,11 @@ const fetchErrorStatistics = async () => {
       healthIssues.value = data.issues || []
     }
   } catch (error) {
-    console.error('获取健康状态失败:', error)
+    console.error('获取系统状态失败:', error)
   }
 }
 
 const fetchOptimizationSuggestions = async () => {
-  try {
-    const res = await request.get('/v1/openclaw/optimizer/suggestions/')
-    if (res.data?.success) {
-      optimizationSuggestions.value = res.data.data || []
-    }
-  } catch (error) {
-    console.error('获取优化建议失败:', error)
-  }
 }
 
 const getErrorTypeTag = (errorType) => {
@@ -914,12 +896,12 @@ const handleStart = async () => {
       config
     })
 
-    if (res.data?.success) {
+    if (isSuccess(res)) {
       ElMessage.success('自动化流程已启动')
       isRunning.value = true
-      currentWorkflow.value = res.data.data
+      currentWorkflow.value = res.data
       currentStep.value = 'collecting'
-      addLog('info', `启动自动化流程，任务ID: ${res.data.data.task_id}`)
+      addLog('info', `启动自动化流程，任务ID: ${res.data.task_id}`)
     }
   } catch (error) {
     if (error !== 'cancel') {
@@ -951,8 +933,8 @@ const fetchWorkflowStatus = async () => {
 
   try {
     const res = await request.get(`/v1/openclaw/automation/status/?workflow_id=${currentWorkflow.value.workflow_id}`)
-    if (res.data?.success) {
-      const data = res.data.data
+    if (isSuccess(res)) {
+      const data = res.data
       currentWorkflow.value = { ...currentWorkflow.value, ...data }
 
       if (data.current_task) {
@@ -983,8 +965,8 @@ const fetchWorkflowStatus = async () => {
 const fetchExecutionHistory = async () => {
   try {
     const res = await request.get('/v1/openclaw/one-click/tasks/')
-    if (res.data?.success) {
-      executionHistory.value = res.data.data || []
+    if (isSuccess(res)) {
+      executionHistory.value = res.data || []
     }
   } catch (error) {
     console.error('获取历史失败:', error)
@@ -997,18 +979,6 @@ const addLog = (level, message) => {
     message,
     timestamp: new Date().toISOString()
   })
-}
-
-const getStatusType = (status) => {
-  const types = {
-    pending: 'info',
-    running: 'primary',
-    completed: 'success',
-    failed: 'danger',
-    waiting_review: 'warning',
-    cancelled: 'info'
-  }
-  return types[status] || 'info'
 }
 
 const getStatusText = (status) => {
@@ -1043,18 +1013,6 @@ const getScoreClass = (score) => {
   if (score >= 90) return 'score-high'
   if (score >= 70) return 'score-medium'
   return 'score-low'
-}
-
-const formatTime = (time) => {
-  if (!time) return '-'
-  const date = new Date(time)
-  return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
 }
 
 let statusInterval = null
@@ -1095,13 +1053,13 @@ onUnmounted(() => {
   .launch-title {
     font-size: 28px;
     font-weight: 600;
-    color: #303133;
+    color: #1E293B;
     margin-bottom: 8px;
   }
 
   .launch-subtitle {
     font-size: 14px;
-    color: #909399;
+    color: #64748B;
   }
 }
 
@@ -1132,7 +1090,7 @@ onUnmounted(() => {
 .enterprise-select {
   h4 {
     margin-bottom: 12px;
-    color: #303133;
+    color: #1E293B;
   }
 }
 
@@ -1149,12 +1107,12 @@ onUnmounted(() => {
 .workflow-options {
   h4 {
     margin-bottom: 16px;
-    color: #303133;
+    color: #1E293B;
   }
 }
 
 .form-tip {
-  color: #909399;
+  color: #64748B;
   font-size: 12px;
   margin-top: 4px;
 }
@@ -1166,7 +1124,7 @@ onUnmounted(() => {
   .start-button {
     width: 200px;
     height: 50px;
-    font-size: 16px;
+    font-size: 18px;
   }
 }
 
@@ -1178,220 +1136,153 @@ onUnmounted(() => {
   }
 
   .progress-item {
-    padding: 16px;
-    border-left: 2px solid #dcdfe6;
-    margin-left: 20px;
-    position: relative;
-    margin-bottom: 20px;
+    padding: 12px 0;
+    border-bottom: 1px solid #E2E8F0;
 
     &:last-child {
-      border-left-color: transparent;
+      border-bottom: none;
     }
 
     .step-header {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       margin-bottom: 8px;
-    }
 
-    .step-icon {
-      position: absolute;
-      left: -13px;
-      background: #fff;
-      color: #909399;
-      border-radius: 50%;
-      padding: 2px;
+      .step-icon {
+        font-size: 18px;
 
-      &.done {
-        color: #67c23a;
+        &.done {
+          color: #16A34A;
+        }
+
+        &.active {
+          color: #3B82F6;
+          animation: pulse 1s infinite;
+        }
       }
 
-      &.active {
-        color: #409eff;
-        animation: rotate 1s linear infinite;
+      .step-title {
+        font-weight: 500;
+        color: #1E293B;
       }
-    }
-
-    .step-title {
-      font-weight: 600;
-      color: #303133;
     }
 
     .step-desc {
-      color: #909399;
+      color: #64748B;
       font-size: 13px;
-      margin-left: 24px;
+      margin-left: 26px;
     }
 
     .step-result {
       margin-top: 8px;
-      margin-left: 24px;
+      margin-left: 26px;
     }
   }
-}
-
-@keyframes rotate {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 
 .logs-container {
   max-height: 300px;
   overflow-y: auto;
-  font-family: monospace;
-  font-size: 13px;
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 12px;
 
   .log-item {
-    padding: 6px 0;
-    border-bottom: 1px solid #f0f0f0;
+    padding: 4px 8px;
+    border-radius: 4px;
+    margin-bottom: 4px;
 
-    .log-time {
-      color: #909399;
-      margin-right: 10px;
-    }
-
-    &.log-error {
-      color: #f56c6c;
+    &.log-info {
+      background-color: #f4f4f5;
     }
 
     &.log-success {
-      color: #67c23a;
+      background-color: #F0FDF4;
+      color: #16A34A;
     }
 
-    &.log-warning {
-      color: #e6a23c;
+    &.log-error {
+      background-color: #fef0f0;
+      color: #DC2626;
+    }
+
+    .log-time {
+      color: #64748B;
+      margin-right: 8px;
     }
   }
 }
 
-.auto-fix-content {
-  .fix-description {
-    color: #909399;
-    font-size: 13px;
-    margin-bottom: 12px;
+.llm-config-content {
+  .llm-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
   }
 
-  .fix-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
+  .llm-status {
+    margin-top: 16px;
+  }
+}
 
-    li {
-      padding: 6px 0;
-      color: #606266;
-      font-size: 13px;
+.error-stats-row {
+  .stat-box {
+    text-align: center;
+    padding: 16px;
+    background-color: #F1F5F9;
+    border-radius: 8px;
 
-      &::before {
-        content: '✓';
-        color: #67c23a;
-        margin-right: 8px;
-      }
+    .stat-value {
+      font-size: 24px;
+      font-weight: 600;
+      color: #1E293B;
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: #64748B;
+      margin-top: 4px;
     }
   }
+}
 
-  .fix-stats {
-    margin-top: 16px;
+.frequent-errors,
+.recent-failures {
+  .error-item,
+  .failure-item {
+    padding: 12px;
+    background-color: #F1F5F9;
+    border-radius: 8px;
+    margin-bottom: 8px;
 
-    .fix-record {
+    .error-header,
+    .failure-info {
       display: flex;
       justify-content: space-between;
-      padding: 6px 0;
-      font-size: 12px;
-      color: #909399;
+      align-items: center;
+      margin-bottom: 8px;
     }
-  }
-}
 
-.error-diagnosis-content {
-  .error-stats-row {
-    margin-bottom: 16px;
-
-    .stat-box {
-      text-align: center;
-      padding: 12px;
-      background: #f5f7fa;
-      border-radius: 8px;
-
-      .stat-value {
-        font-size: 24px;
-        font-weight: 600;
-        color: #303133;
-      }
-
-      .stat-label {
-        font-size: 12px;
-        color: #909399;
-        margin-top: 4px;
-      }
-    }
-  }
-
-  .frequent-errors,
-  .recent-failures {
-    .error-item,
-    .failure-item {
-      padding: 10px;
-      background: #fafafa;
-      border-radius: 6px;
-      margin-bottom: 10px;
-
-      .error-header,
-      .failure-info {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 6px;
-      }
-
-      .error-count {
-        font-size: 12px;
-        color: #909399;
-      }
-
-      .error-cause {
-        font-size: 13px;
-        color: #606266;
-        margin-bottom: 4px;
-      }
-
-      .error-solution {
-        font-size: 12px;
-        color: #409eff;
-        display: flex;
-        align-items: center;
-        gap: 4px;
-      }
-
-      .failure-time {
-        font-size: 11px;
-        color: #909399;
-      }
-
-      .failure-msg {
-        font-size: 12px;
-        color: #606266;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
+    .error-cause,
+    .failure-msg {
+      color: #334155;
+      font-size: 13px;
     }
   }
 }
 
 .health-content {
   .health-issues {
-    margin-top: 12px;
+    margin-top: 16px;
 
     .health-issue {
       display: flex;
       align-items: center;
       gap: 8px;
       padding: 8px;
-      background: #fef0f0;
+      background-color: #fef0f0;
       border-radius: 4px;
-      color: #F56C6C;
-      font-size: 13px;
+      color: #DC2626;
       margin-bottom: 8px;
     }
   }
@@ -1400,7 +1291,7 @@ onUnmounted(() => {
 .optimization-content {
   .suggestion-item {
     padding: 12px;
-    background: #f5f7fa;
+    background-color: #F1F5F9;
     border-radius: 8px;
     margin-bottom: 12px;
 
@@ -1409,12 +1300,6 @@ onUnmounted(() => {
       align-items: center;
       gap: 8px;
       margin-bottom: 8px;
-
-      .suggestion-issue {
-        font-size: 13px;
-        color: #303133;
-        font-weight: 500;
-      }
     }
 
     .suggestion-body {
@@ -1422,35 +1307,31 @@ onUnmounted(() => {
         display: flex;
         align-items: center;
         gap: 8px;
-        font-size: 12px;
-        margin-bottom: 6px;
+        margin-bottom: 8px;
 
         .current {
-          color: #909399;
+          color: #64748B;
           text-decoration: line-through;
         }
 
         .suggested {
-          color: #67C23A;
+          color: #16A34A;
           font-weight: 500;
         }
       }
 
       .suggestion-reason {
-        font-size: 12px;
-        color: #606266;
+        color: #334155;
+        font-size: 13px;
       }
     }
   }
 }
 
 .history-list {
-  max-height: 300px;
-  overflow-y: auto;
-
   .history-item {
-    padding: 12px 0;
-    border-bottom: 1px solid #f0f0f0;
+    padding: 12px;
+    border-bottom: 1px solid #E2E8F0;
 
     &:last-child {
       border-bottom: none;
@@ -1460,47 +1341,24 @@ onUnmounted(() => {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 4px;
-    }
-
-    .history-enterprise {
-      font-weight: 600;
-      color: #303133;
+      margin-bottom: 8px;
     }
 
     .history-meta {
       display: flex;
-      justify-content: space-between;
+      gap: 16px;
+      color: #64748B;
       font-size: 12px;
-      color: #909399;
     }
   }
 }
 
-.llm-config-content {
-  .llm-actions {
-    display: flex;
-    gap: 10px;
-    margin-top: 16px;
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
   }
-
-  .llm-status {
-    margin-top: 16px;
+  50% {
+    opacity: 0.5;
   }
-}
-
-.score-high {
-  color: #67c23a;
-  font-weight: 600;
-}
-
-.score-medium {
-  color: #e6a23c;
-  font-weight: 600;
-}
-
-.score-low {
-  color: #f56c6c;
-  font-weight: 600;
 }
 </style>

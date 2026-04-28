@@ -93,6 +93,12 @@ const routes = [
         meta: { title: '定时采集' }
       },
       {
+        path: 'crawl-statistics',
+        name: 'CrawlStatistics',
+        component: () => import('@/views/crawl/CrawlStatistics.vue'),
+        meta: { title: '采集统计' }
+      },
+      {
         path: 'schedules/create',
         name: 'CreateSchedule',
         component: () => import('@/views/schedule/CreateSchedule.vue'),
@@ -138,13 +144,13 @@ const routes = [
         path: 'system/users',
         name: 'UserManagement',
         component: () => import('@/views/system/UserManagement.vue'),
-        meta: { title: '用户管理' }
+        meta: { title: '用户管理', requiresAdmin: true }
       },
       {
         path: 'system/models',
         name: 'ModelConfig',
         component: () => import('@/views/system/ModelConfig.vue'),
-        meta: { title: '模型选择' }
+        meta: { title: '模型选择', requiresAdmin: true }
       },
       {
         path: 'system/playground',
@@ -159,41 +165,49 @@ const routes = [
         meta: { title: '项目知识库' }
       },
       {
-        path: 'system/multi-view-demo',
-        name: 'MultiViewDialogDemo',
-        component: () => import('@/views/system/MultiViewDialogDemo.vue'),
-        meta: { title: 'MultiViewDialog 演示' }
-      },
-      {
         path: 'system/templates',
         name: 'WebsiteTemplateList',
         component: () => import('@/views/system/WebsiteTemplateList.vue'),
-        meta: { title: '网站模板管理' }
+        meta: { title: '网站模板管理', requiresAdmin: true }
       },
       {
         path: 'system/monitor',
         name: 'ServiceMonitor',
         component: () => import('@/views/system/ServiceMonitor.vue'),
-        meta: { title: '服务监控' }
+        meta: { title: '服务监控', requiresAdmin: true }
       }
     ]
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'NotFound',
+    component: () => import('@/views/NotFound.vue'),
+    meta: { title: '页面不存在' }
   }
 ]
 
 const router = createRouter({
-  history: createWebHistory(process.env.BASE_URL),
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes
 })
 
-router.beforeEach((to, from, next) => {
-  document.title = to.meta.title ? `${to.meta.title} - 天齐AI大模型投标平台` : '天齐AI大模型投标平台'
-  
+router.beforeEach(async (to, from, next) => {
+  const appTitle = import.meta.env.VITE_TITLE || '天齐AI大模型投标平台'
+  document.title = to.meta.title ? `${to.meta.title} - ${appTitle}` : appTitle
+
   const userStore = useUserStore()
   const requiresAuth = to.matched.some(record => record.meta.requiresAuth !== false)
-  
-  if (requiresAuth && !userStore.isLoggedIn) {
-    next('/login')
+  const requiresAdmin = to.matched.some(record => record.meta.requiresAdmin)
+
+  if (!userStore.isLoggedIn) {
+    if (requiresAuth) {
+      next({ path: '/login', query: { redirect: to.fullPath } })
+    } else {
+      next()
+    }
   } else if ((to.path === '/login' || to.path === '/register') && userStore.isLoggedIn) {
+    next('/dashboard')
+  } else if (requiresAdmin && !userStore.userInfo?.is_staff) {
     next('/dashboard')
   } else {
     next()

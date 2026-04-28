@@ -108,6 +108,21 @@ class SensitiveFieldMasker:
         return f"{masked_local}@{parts[1]}"
 
     @staticmethod
+    def mask_address(value: str) -> str:
+        """
+        地址脱敏
+
+        Args:
+            value: 原始地址
+
+        Returns:
+            str: 脱敏后的地址
+        """
+        if not value or len(value) < 10:
+            return '***'
+        return f"{value[:6]}***{value[-4:]}"
+
+    @staticmethod
     def mask_fixed(value: str) -> str:
         """
         固定值脱敏
@@ -151,6 +166,8 @@ class SensitiveFieldMasker:
                     return cls.mask_phone(value_str)
                 elif mask_type == 'email':
                     return cls.mask_email(value_str)
+                elif mask_type == 'address':
+                    return cls.mask_address(value_str)
                 elif mask_type == 'fixed':
                     return '***'
 

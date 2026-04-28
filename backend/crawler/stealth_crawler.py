@@ -25,6 +25,7 @@ from django.conf import settings
 from core.constants import CrawlStrategy, CrawlStatus
 
 from .common_types import CrawlResult, ProxyConfig, BrowserFingerprint
+from .pyppeteer_crawler import PyppeteerCrawler
 
 
 logger = logging.getLogger(__name__)
@@ -229,7 +230,8 @@ class StealthCrawler(ABC):
     async def init_browser(
         self,
         headless: bool = True,
-        fingerprint: BrowserFingerprint = None
+        fingerprint: BrowserFingerprint = None,
+        executablePath: str = None
     ) -> bool:
         from pyppeteer import launch
         
@@ -260,7 +262,13 @@ class StealthCrawler(ABC):
                 'defaultViewport': fingerprint.viewport,
                 'ignoreHTTPSErrors': True,
                 'dumpio': False,
+                'handleSIGINT': False,
+                'handleSIGTERM': False,
+                'handleSIGHUP': False,
             }
+            
+            if executablePath:
+                launch_options['executablePath'] = executablePath
             
             if self.proxy_config.enabled:
                 proxy = self.proxy_config.get_next_proxy()
@@ -609,7 +617,10 @@ class StealthCrawler(ABC):
     async def _crawl_by_stealth(self, url: str, **kwargs) -> CrawlResult:
         try:
             fingerprint = BrowserFingerprint.random_fingerprint()
-            await self.init_browser(headless=True, fingerprint=fingerprint)
+            executable_path = PyppeteerCrawler.find_browser_executable()
+            browser_ok = await self.init_browser(headless=True, fingerprint=fingerprint, executablePath=executable_path)
+            if not browser_ok or not self.page:
+                return CrawlResult(success=False, error_message='浏览器初始化失败')
             
             domain = urlparse(url).netloc
             cached_cookies = self.get_cookies_from_cache(domain)
@@ -638,7 +649,10 @@ class StealthCrawler(ABC):
     
     async def _crawl_by_headless(self, url: str, **kwargs) -> CrawlResult:
         try:
-            await self.init_browser(headless=True)
+            executable_path = PyppeteerCrawler.find_browser_executable()
+            browser_ok = await self.init_browser(headless=True, executablePath=executable_path)
+            if not browser_ok or not self.page:
+                return CrawlResult(success=False, error_message='浏览器初始化失败')
             html = await self.navigate_with_behavior(
                 url,
                 wait_selector=kwargs.get('wait_selector'),

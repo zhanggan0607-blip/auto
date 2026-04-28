@@ -4,15 +4,15 @@ const BASE_URL = '/v1/auth'
 
 export const authApi = {
   login(data) {
-    return request.post(`${BASE_URL}/login/`, data)
+    return request.post(`${BASE_URL}/login/`, data, { _skipAuthRetry: true })
   },
 
   register(data) {
-    return request.post(`${BASE_URL}/register/`, data)
+    return request.post(`${BASE_URL}/register/`, data, { _skipAuthRetry: true })
   },
 
   logout() {
-    return request.post(`${BASE_URL}/logout/`)
+    return request.post(`${BASE_URL}/logout/`, {}, { _skipAuthRetry: true })
   },
 
   getCurrentUser() {

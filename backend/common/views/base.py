@@ -25,6 +25,7 @@
 """
 import logging
 from rest_framework import viewsets, status
+from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.filters import SearchFilter, OrderingFilter
@@ -81,8 +82,11 @@ class BaseViewSet(
         """自动过滤当前用户数据"""
         queryset = super().get_queryset()
         if hasattr(self.request, 'user') and self.request.user.is_authenticated:
-            if hasattr(queryset.model, 'user'):
+            model = queryset.model
+            if hasattr(model, 'user'):
                 queryset = queryset.filter(user=self.request.user)
+            elif hasattr(model, 'created_by'):
+                queryset = queryset.filter(created_by=self.request.user)
         return queryset
 
 
@@ -179,10 +183,16 @@ class SoftDeleteViewSet(BaseViewSet):
         else:
             instance.delete()
 
-    @staticmethod
-    def restore(request, *args, **kwargs):
+    @action(detail=True, methods=['post'])
+    def restore(self, request, pk=None):
         """恢复已删除的数据"""
-        return UnifiedResponse.error(message='恢复功能暂未实现')
+        obj = self.get_object()
+        if hasattr(obj, 'is_deleted') and obj.is_deleted:
+            obj.is_deleted = False
+            obj.deleted_at = None
+            obj.save(update_fields=['is_deleted', 'deleted_at'] if hasattr(obj, 'deleted_at') else ['is_deleted'])
+            return UnifiedResponse.success(message='恢复成功')
+        return UnifiedResponse.error(message='该数据未被删除，无需恢复')
 
 
 class AuthenticatedModelViewSet(BaseViewSet):
@@ -297,6 +307,9 @@ class ManualPermissionViewSet(APIResponseMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
         if hasattr(self.request, 'user') and self.request.user.is_authenticated:
-            if hasattr(queryset.model, 'user'):
+            model = queryset.model
+            if hasattr(model, 'user'):
                 queryset = queryset.filter(user=self.request.user)
+            elif hasattr(model, 'created_by'):
+                queryset = queryset.filter(created_by=self.request.user)
         return queryset

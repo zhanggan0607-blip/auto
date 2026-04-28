@@ -20,7 +20,7 @@ try:
     CHROMA_AVAILABLE = True
 except ImportError:
     CHROMA_AVAILABLE = False
-    logger.warning("chromadb模块未安装，向量库功能将不可用")
+    logger.info("chromadb模块未安装，向量库功能将不可用")
 
 
 class ChromaAccessControl:
@@ -32,7 +32,9 @@ class ChromaAccessControl:
 
     SYSTEM_COLLECTIONS = [
         'enterprise_embeddings',
+        'enterprise_vectors',
         'document_library',
+        'bid_document_library',
         'shared_knowledge',
     ]
 
@@ -156,6 +158,8 @@ class ChromaClient:
             cls._instance = super().__new__(cls)
             cls._instance._client = None
             cls._instance._collections = {}
+            cls._instance._collection_timestamps = {}
+            cls._instance._collection_ttl = 300
             cls._instance._available = False
             cls._instance._initialize()
         return cls._instance
@@ -165,7 +169,7 @@ class ChromaClient:
         初始化Chroma客户端
         """
         if not CHROMA_AVAILABLE:
-            logger.warning("Chroma不可用，跳过初始化")
+            logger.info("Chroma不可用，跳过初始化")
             self._available = False
             return
 
@@ -212,7 +216,7 @@ class ChromaClient:
             Collection对象
         """
         if not self._available:
-            logger.warning(f"Chroma不可用，无法获取集合: {name}")
+            logger.debug(f"Chroma不可用，无法获取集合: {name}")
             return None
 
         isolated_name = ChromaAccessControl.get_user_collection_name(name, user_id)
@@ -223,7 +227,13 @@ class ChromaClient:
             return None
 
         if isolated_name in self._collections:
-            return self._collections[isolated_name]
+            ts = self._collection_timestamps.get(isolated_name, 0)
+            import time
+            if time.time() - ts < self._collection_ttl:
+                return self._collections[isolated_name]
+            else:
+                del self._collections[isolated_name]
+                self._collection_timestamps.pop(isolated_name, None)
 
         try:
             collection = self._client.get_or_create_collection(
@@ -235,6 +245,8 @@ class ChromaClient:
                 }
             )
             self._collections[isolated_name] = collection
+            import time
+            self._collection_timestamps[isolated_name] = time.time()
             ChromaAccessControl.log_access('get', name, user_id, success=True)
             logger.info(f"获取/创建集合: {isolated_name} (base: {name})")
             return collection
@@ -371,7 +383,14 @@ class ChromaClient:
 
         try:
             where_filter = None
-            if filter_metadata:
+            if filter_metadata and user_id:
+                where_filter = {
+                    "$and": [
+                        {"user_id": str(user_id)},
+                        filter_metadata
+                    ]
+                }
+            elif filter_metadata:
                 where_filter = filter_metadata
             elif user_id:
                 where_filter = {"user_id": str(user_id)}

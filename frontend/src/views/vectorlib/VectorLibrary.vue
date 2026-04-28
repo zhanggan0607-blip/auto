@@ -1,4 +1,4 @@
-<template>
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<template>
   <div class="page-container">
     <div class="page-header">
       <h3 class="page-title">投标文档向量库</h3>
@@ -6,6 +6,10 @@
         <el-button type="primary" @click="showUploadDialog">
           <el-icon><Upload /></el-icon>
           上传文档
+        </el-button>
+        <el-button type="warning" @click="showBatchUploadDialog">
+          <el-icon><Upload /></el-icon>
+          批量上传
         </el-button>
         <el-button type="success" @click="showAISearchDialog">
           <el-icon><Search /></el-icon>
@@ -328,6 +332,104 @@
     </el-dialog>
 
     <el-dialog
+      v-model="batchUploadDialogVisible"
+      title="批量上传投标文档"
+      width="700px"
+      :close-on-click-modal="false"
+    >
+      <el-form
+        ref="batchUploadFormRef"
+        :model="batchUploadForm"
+        label-width="100px"
+      >
+        <el-row :gutter="20">
+          <el-col :span="12">
+            <el-form-item label="文档类型">
+              <el-select v-model="batchUploadForm.document_type" placeholder="选择文档类型" style="width: 100%">
+                <el-option
+                  v-for="item in documentTypeOptions"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="所属行业">
+              <el-input v-model="batchUploadForm.industry" placeholder="输入所属行业" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-row :gutter="20">
+          <el-col :span="12">
+            <el-form-item label="项目类型">
+              <el-input v-model="batchUploadForm.project_type" placeholder="输入项目类型" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="质量阈值">
+              <el-input-number v-model="batchUploadForm.min_quality_score" :min="0" :max="100" :step="5" />
+              <span class="form-tip" style="margin-left: 8px">低于此分数将被跳过</span>
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-form-item label="选择文件">
+          <el-upload
+            ref="batchUploadRef"
+            class="batch-upload-area"
+            :auto-upload="false"
+            :limit="100"
+            :multiple="true"
+            :on-change="handleBatchFileChange"
+            :on-remove="handleBatchFileRemove"
+            :file-list="batchFileList"
+            accept=".doc,.docx,.pdf,.txt,.md"
+          >
+            <el-button type="primary">
+              <el-icon><Upload /></el-icon>
+              选择多个文件
+            </el-button>
+            <template #tip>
+              <div class="el-upload__tip">
+                支持 .doc/.docx/.pdf/.txt/.md 格式，支持批量选择（最多100个文件）
+              </div>
+            </template>
+          </el-upload>
+        </el-form-item>
+
+        <el-form-item v-if="batchFileList.length > 0">
+          <div class="batch-file-info">
+            <span>已选择 {{ batchFileList.length }} 个文件</span>
+            <el-button type="text" @click="batchFileList = []">清空</el-button>
+          </div>
+        </el-form-item>
+      </el-form>
+
+      <div v-if="batchUploadProgress.total > 0" class="upload-progress">
+        <el-progress
+          :percentage="Math.round(batchUploadProgress.current / batchUploadProgress.total * 100)"
+          :status="batchUploadProgress.status"
+        />
+        <div class="progress-info">
+          已处理: {{ batchUploadProgress.current }} / {{ batchUploadProgress.total }}
+          <span v-if="batchUploadProgress.success > 0" class="success-count">成功: {{ batchUploadProgress.success }}</span>
+          <span v-if="batchUploadProgress.failed > 0" class="failed-count">失败: {{ batchUploadProgress.failed }}</span>
+          <span v-if="batchUploadProgress.skipped > 0" class="skipped-count">跳过: {{ batchUploadProgress.skipped }}</span>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="batchUploadDialogVisible = false" :disabled="batchUploading">取消</el-button>
+        <el-button type="primary" :loading="batchUploading" :disabled="batchFileList.length === 0" @click="submitBatchUpload">
+          开始上传
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
       v-model="documentDetailVisible"
       :title="currentDocument?.title"
       width="800px"
@@ -572,6 +674,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Upload, Download } from '@element-plus/icons-vue'
 import { vectorlibApi } from '@/api/vectorlib'
 import { formatDate } from '@/utils/date'
+import { parseListResponse } from '@/utils/response-parser'
 
 const loading = ref(false)
 const documentList = ref([])
@@ -627,6 +730,108 @@ const uploadRules = {
   file: [
     { required: true, message: '请选择文档文件', trigger: 'change' }
   ]
+}
+
+const batchUploadDialogVisible = ref(false)
+const batchUploading = ref(false)
+const batchUploadFormRef = ref(null)
+const batchUploadRef = ref(null)
+const batchFileList = ref([])
+
+const batchUploadForm = reactive({
+  document_type: 'bid_document',
+  industry: '',
+  project_type: '',
+  min_quality_score: 90
+})
+
+const batchUploadProgress = reactive({
+  total: 0,
+  current: 0,
+  success: 0,
+  failed: 0,
+  skipped: 0,
+  status: ''
+})
+
+const showBatchUploadDialog = () => {
+  batchUploadForm.document_type = 'bid_document'
+  batchUploadForm.industry = ''
+  batchUploadForm.project_type = ''
+  batchUploadForm.min_quality_score = 90
+  batchFileList.value = []
+  batchUploadProgress.total = 0
+  batchUploadProgress.current = 0
+  batchUploadProgress.success = 0
+  batchUploadProgress.failed = 0
+  batchUploadProgress.skipped = 0
+  batchUploadProgress.status = ''
+  batchUploadDialogVisible.value = true
+}
+
+const handleBatchFileChange = (file, files) => {
+  batchFileList.value = files
+}
+
+const handleBatchFileRemove = (file, files) => {
+  batchFileList.value = files
+}
+
+const submitBatchUpload = async () => {
+  if (!batchUploadFormRef.value) return
+
+  if (batchFileList.value.length === 0) {
+    ElMessage.error('请选择要上传的文件')
+    return
+  }
+
+  batchUploading.value = true
+  batchUploadProgress.total = batchFileList.value.length
+  batchUploadProgress.current = 0
+  batchUploadProgress.success = 0
+  batchUploadProgress.failed = 0
+  batchUploadProgress.skipped = 0
+
+  try {
+    const formData = new FormData()
+    batchFileList.value.forEach(file => {
+      formData.append('files', file.raw)
+    })
+    formData.append('document_type', batchUploadForm.document_type)
+    if (batchUploadForm.industry) formData.append('industry', batchUploadForm.industry)
+    if (batchUploadForm.project_type) formData.append('project_type', batchUploadForm.project_type)
+    formData.append('min_quality_score', batchUploadForm.min_quality_score.toString())
+
+    const res = await vectorlibApi.batchUpload(formData)
+    if (res.code === 0 || res.success) {
+      const result = res.data || res
+      batchUploadProgress.current = result.total_files || batchFileList.value.length
+      batchUploadProgress.success = result.success_count || 0
+      batchUploadProgress.failed = result.failed_count || 0
+      batchUploadProgress.skipped = result.skipped_count || 0
+      batchUploadProgress.status = 'success'
+
+      ElMessage.success({
+        message: `批量上传完成: 成功${batchUploadProgress.success}个, 跳过${batchUploadProgress.skipped}个, 失败${batchUploadProgress.failed}个`,
+        duration: 5000
+      })
+
+      if (batchUploadProgress.success > 0) {
+        batchUploadDialogVisible.value = false
+        fetchDocuments()
+        fetchStatistics()
+      }
+    } else {
+      ElMessage.error(res.message || '批量上传失败')
+      batchUploadProgress.status = 'exception'
+    }
+  } catch (error) {
+    console.error('批量上传失败:', error)
+    ElMessage.error('批量上传失败，请重试')
+    batchUploadProgress.status = 'exception'
+  } finally {
+    batchUploading.value = false
+  }
 }
 
 const aiSearchDialogVisible = ref(false)
@@ -780,8 +985,9 @@ const executeAdvancedSearch = async () => {
       excluded_keywords: advancedSearchForm.excluded_keywords
     })
     if (res.code === 0) {
-      advancedSearchResults.value = res.data?.results || []
-      advancedSearchTotal.value = res.data?.total || 0
+      const { list, total } = parseListResponse(res)
+      advancedSearchResults.value = list
+      advancedSearchTotal.value = total
       ElMessage.success(`找到 ${advancedSearchTotal.value} 个相关文档`)
     } else {
       ElMessage.error(res.message || '搜索失败')
@@ -835,8 +1041,9 @@ const fetchDocuments = async () => {
 
     const res = await vectorlibApi.getDocuments(params)
     if (res.code === 0) {
-      documentList.value = res.data?.list || res.data?.results || []
-      pagination.total = res.data?.total || res.data?.count || 0
+      const { list, total } = parseListResponse(res)
+      documentList.value = list
+      pagination.total = total
     }
   } catch (error) {
     console.error('获取文档列表失败:', error)
@@ -859,8 +1066,9 @@ const handleSemanticSearch = async () => {
       limit: pagination.pageSize
     })
     if (res.code === 0) {
-      documentList.value = res.data?.results || []
-      pagination.total = res.data?.total || 0
+      const { list, total } = parseListResponse(res)
+      documentList.value = list
+      pagination.total = total
       ElMessage.success(`找到 ${res.data?.total || 0} 个相关文档`)
     }
   } catch (error) {
@@ -968,7 +1176,8 @@ const showAISearchDialog = async () => {
   try {
     const res = await vectorlibApi.getAISearchTasks({ page_size: 5 })
     if (res.code === 0) {
-      aiSearchTasks.value = res.data?.list || res.data?.results || []
+      const { list } = parseListResponse(res)
+      aiSearchTasks.value = list
     }
   } catch (error) {
     console.error('获取AI搜索任务失败:', error)
@@ -1105,12 +1314,12 @@ onMounted(() => {
 .stat-value {
   font-size: 28px;
   font-weight: bold;
-  color: #303133;
+  color: #1E293B;
 }
 
 .stat-label {
   font-size: 14px;
-  color: #909399;
+  color: #64748B;
   margin-top: 8px;
 }
 
@@ -1147,12 +1356,12 @@ onMounted(() => {
 .ai-search-tasks {
   margin-top: 20px;
   padding-top: 20px;
-  border-top: 1px solid #ebeef5;
+  border-top: 1px solid #E2E8F0;
 }
 
 .ai-search-tasks h4 {
   margin-bottom: 10px;
-  color: #606266;
+  color: #334155;
 }
 
 .doc-actions {
@@ -1181,20 +1390,20 @@ onMounted(() => {
 
 .form-tip {
   margin-top: 10px;
-  color: #909399;
+  color: #64748B;
   font-size: 12px;
 }
 
 .similarity-value {
   margin-left: 15px;
-  color: #409eff;
+  color: #3B82F6;
   font-weight: bold;
 }
 
 .advanced-search-results {
   margin-top: 20px;
   padding: 15px;
-  background: #f5f7fa;
+  background: #F1F5F9;
   border-radius: 4px;
 }
 
@@ -1203,7 +1412,7 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 10px;
-  color: #606266;
+  color: #334155;
   font-size: 14px;
 }
 </style>

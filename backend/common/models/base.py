@@ -43,9 +43,8 @@ class SingletonModel(models.Model):
         abstract = True
 
     def save(self, *args, **kwargs):
-        if self.pk is None:
-            existing = self.__class__.objects.filter(pk=self.pk).first()
-            if existing:
+        if self.__class__.objects.exists():
+            if self.pk is None or not self.__class__.objects.filter(pk=self.pk).exists():
                 raise ValueError(f"{self.__class__.__name__} 只能存在一个实例")
         super().save(*args, **kwargs)
 

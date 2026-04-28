@@ -58,18 +58,31 @@ class ContentRecognitionAgent(BaseAgent):
         加载数据提取规则
         """
         try:
-            from apps.crawler.models import WebsiteTemplate
-            templates = WebsiteTemplate.objects.filter(is_active=True)
-            for template in templates:
-                selectors = template.selectors or {}
-                self._extraction_rules[template.code] = {
-                    'selectors': selectors,
-                    'pagination': template.pagination_config or {},
-                    'request': template.request_config or {},
-                }
-            logger.info(f"加载了 {len(self._extraction_rules)} 个网站模板的提取规则")
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                from asgiref.sync import sync_to_async
+                self._load_extraction_rules_sync = None
+                return
+
+            self._do_load_extraction_rules()
         except Exception as e:
             logger.warning(f"加载提取规则失败: {str(e)}")
+
+    def _do_load_extraction_rules(self):
+        from apps.crawler.models import WebsiteTemplate
+        templates = WebsiteTemplate.objects.filter(is_active=True)
+        for template in templates:
+            selectors = template.selectors or {}
+            self._extraction_rules[template.code] = {
+                'selectors': selectors,
+                'pagination': template.pagination_config or {},
+                'request': template.request_config or {},
+            }
+        logger.info(f"加载了 {len(self._extraction_rules)} 个网站模板的提取规则")
 
     async def execute(self, task: Dict[str, Any]) -> TaskResult:
         """
@@ -103,6 +116,9 @@ class ContentRecognitionAgent(BaseAgent):
             )
 
         try:
+            if not self._extraction_rules:
+                await asyncio.to_thread(self._do_load_extraction_rules)
+
             self.update_context('url', url)
             self.update_context('source_type', source_type)
             self.update_context('content_type', content_type)
@@ -123,7 +139,8 @@ class ContentRecognitionAgent(BaseAgent):
 
             record_id = None
             if save_to_db:
-                record_id = await self._save_recognized_content(
+                record_id = await asyncio.to_thread(
+                    self._save_recognized_content,
                     url=url,
                     source_type=source_type,
                     content_type=content_type,
@@ -508,7 +525,6 @@ class ContentRecognitionAgent(BaseAgent):
 
         return str(date_value)
 
-    @sync_to_async
     def _save_recognized_content(
         self,
         url: str,
@@ -610,6 +626,14 @@ class ContentRecognitionAgent(BaseAgent):
             return f"{parsed.scheme}://{parsed.netloc}"
         except Exception:
             return url
+
+
+def _load_rules_sync(agent):
+    agent._do_load_extraction_rules()
+
+
+def _save_content_sync(agent, **kwargs):
+    return agent._save_recognized_content(**kwargs)
 
 
 class BatchContentRecognitionAgent(BaseAgent):

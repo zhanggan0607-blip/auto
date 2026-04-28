@@ -2,6 +2,7 @@
 故障自愈机制
 包含：IP切换、指纹更换、降级解析、失败知识库
 """
+import asyncio
 import logging
 import random
 import time
@@ -209,9 +210,14 @@ class SelfHealingCrawler:
                     return result
                 
                 failure_type = self._detect_failure_type(result.error_message)
-                
-                self._apply_healing_strategy(failure_type, attempt)
-                
+
+                healing_action = self._apply_healing_strategy(failure_type, attempt)
+
+                if healing_action == 'rate_limit':
+                    delay = min(2 ** attempt, 60)
+                    logger.info(f"限流，等待 {delay} 秒")
+                    await asyncio.sleep(delay)
+
                 failure_record = FailureRecord(
                     url=url,
                     failure_type=failure_type.value,
@@ -260,13 +266,14 @@ class SelfHealingCrawler:
         if failure_type == FailureType.BLOCKED:
             self._handle_blocked()
         elif failure_type == FailureType.RATE_LIMIT:
-            self._handle_rate_limit(attempt)
+            return 'rate_limit'
         elif failure_type == FailureType.CAPTCHA:
             self._handle_captcha()
         elif failure_type == FailureType.TIMEOUT:
             self._handle_timeout()
         elif failure_type == FailureType.NETWORK_ERROR:
             self._handle_network_error()
+        return None
     
     def _handle_blocked(self):
         """

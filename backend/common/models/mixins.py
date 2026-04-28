@@ -69,23 +69,28 @@ class UserTrackMixin(models.Model):
 
     def save(self, *args, **kwargs):
         """保存时自动设置创建人/更新人"""
-        from django.conf import settings
-        from rest_framework.request import Request
+        request = kwargs.pop('request', None)
+        user = None
 
-        if not self.pk:
-            try:
-                request = kwargs.pop('request', None)
-                if request and hasattr(request, 'user') and request.user.is_authenticated:
-                    self.created_by = request.user
-            except Exception:
-                pass
+        if request and hasattr(request, 'user') and request.user.is_authenticated:
+            user = request.user
         else:
             try:
-                request = kwargs.pop('request', None)
-                if request and hasattr(request, 'user') and request.user.is_authenticated:
-                    self.updated_by = request.user
+                from django.contrib.auth.middleware import get_user
+                from django.http import HttpRequest
+                from core.middleware import _thread_local
+
+                if hasattr(_thread_local, 'request') and hasattr(_thread_local.request, 'user'):
+                    req_user = _thread_local.request.user
+                    if hasattr(req_user, 'is_authenticated') and req_user.is_authenticated:
+                        user = req_user
             except Exception:
                 pass
+
+        if user:
+            if not self.pk and not self.created_by:
+                self.created_by = user
+            self.updated_by = user
 
         super().save(*args, **kwargs)
 

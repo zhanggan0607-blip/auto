@@ -5,13 +5,14 @@ Django base settings - 所有环境共享的配置
 import os
 import re
 import secrets
+import logging
 from pathlib import Path
 from datetime import timedelta
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 ENVIRONMENT = os.getenv('DJANGO_ENV', 'development')
-DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
+DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
 def _check_production_security():
     """
@@ -59,7 +60,9 @@ if ENVIRONMENT == 'production':
         raise ValueError('DJANGO_SECRET_KEY environment variable is required in production')
 else:
     from dotenv import load_dotenv
-    load_dotenv()
+    _project_root = BASE_DIR.parent
+    load_dotenv(_project_root / '.env', override=False)
+    load_dotenv(BASE_DIR / '.env', override=False)
     SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'dev-only-insecure-key-do-not-use-in-production')
 
 INSTALLED_APPS = [
@@ -86,7 +89,6 @@ INSTALLED_APPS = [
     'apps.enterprise',
     'apps.openclaw',
     'apps.vectorlib',
-    'apps.scheduler',
     'apps.knowledge',
     'apps.monitor',
 ]
@@ -100,8 +102,10 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'core.middleware.ApiVersionMiddleware',
+    'core.middleware.TraceIdMiddleware',
     'core.middleware.RequestLoggingMiddleware',
-    'core.middleware_tenant.TenantBoundaryMiddleware',
+    'common.middleware.unified_response.UnifiedResponseMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -162,6 +166,7 @@ REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DATETIME_FORMAT': '%Y-%m-%d %H:%M:%S',
     'DATE_FORMAT': '%Y-%m-%d',
+    'EXCEPTION_HANDLER': 'common.exceptions.exception_handler',
     'DEFAULT_THROTTLE_CLASSES': [
         'rest_framework.throttling.AnonRateThrottle',
         'rest_framework.throttling.UserRateThrottle',
@@ -171,7 +176,6 @@ REST_FRAMEWORK = {
         'user': '1000/hour',
         'burst': '60/minute',
     },
-    'EXCEPTION_HANDLER': 'core.exceptions.custom_exception_handler',
 }
 
 SIMPLE_JWT = {
@@ -182,7 +186,12 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
-CELERY_BROKER_URL = f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/{os.getenv('REDIS_DB', '0')}"
+_redis_host = os.getenv('REDIS_HOST', 'localhost')
+_redis_port = os.getenv('REDIS_PORT', '6379')
+_redis_db = os.getenv('REDIS_DB', '0')
+_redis_password = os.getenv('REDIS_PASSWORD')
+_redis_auth = f":{_redis_password}@" if _redis_password else ""
+CELERY_BROKER_URL = f"redis://{_redis_auth}{_redis_host}:{_redis_port}/{_redis_db}"
 CELERY_RESULT_BACKEND = CELERY_BROKER_URL
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
@@ -200,16 +209,30 @@ DINGTALK_WEBHOOK_URL = os.getenv('DINGTALK_WEBHOOK_URL', '')
 
 DINGTALK_SECRET = os.getenv('DINGTALK_SECRET', '')
 
+FEISHU_WEBHOOK_URL = os.getenv('FEISHU_WEBHOOK_URL', '')
+
+FEISHU_SECRET = os.getenv('FEISHU_SECRET', '')
+
+WECOM_WEBHOOK_URL = os.getenv('WECOM_WEBHOOK_URL', '')
+
+NOTIFICATION_EMAIL_RECIPIENTS = [
+    e.strip() for e in os.getenv('NOTIFICATION_EMAIL_RECIPIENTS', '').split(',') if e.strip()
+]
+
+NOTIFICATION_WEBHOOK_URL = os.getenv('NOTIFICATION_WEBHOOK_URL', '')
+
 CHROMA_CONFIG = {
     'PERSIST_DIRECTORY': BASE_DIR / 'chroma_db',
     'COLLECTION_NAME': 'enterprise_embeddings',
 }
 
 EMBEDDING_CONFIG = {
-    'MODEL_TYPE': os.getenv('EMBEDDING_MODEL_TYPE', 'openai'),
+    'MODEL_TYPE': os.getenv('EMBEDDING_MODEL_TYPE', 'ollama'),
     'OPENAI_API_KEY': os.getenv('OPENAI_API_KEY', ''),
     'OPENAI_EMBEDDING_MODEL': 'text-embedding-3-small',
     'LOCAL_MODEL': 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
+    'OLLAMA_BASE_URL': os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434'),
+    'OLLAMA_EMBEDDING_MODEL': os.getenv('OLLAMA_EMBEDDING_MODEL', 'nomic-embed-text'),
 }
 
 MINIO_CONFIG = {
@@ -219,8 +242,6 @@ MINIO_CONFIG = {
     'SECURE': os.getenv('MINIO_SECURE', 'false').lower() == 'true',
     'BUCKET_NAME': os.getenv('MINIO_BUCKET_NAME', 'bid-documents'),
 }
-
-DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
 if not MINIO_CONFIG['ACCESS_KEY'] or not MINIO_CONFIG['SECRET_KEY']:
     if DEBUG:
@@ -285,14 +306,19 @@ SPECTACULAR_SETTINGS = {
     'SERVE_INCLUDE_SCHEMA': False,
 }
 
+DEFAULT_PASSWORD = os.getenv('DEFAULT_PASSWORD', '')
+
+if not DEFAULT_PASSWORD and ENVIRONMENT != 'production':
+    DEFAULT_PASSWORD = 'Dev@2026changeme'
+
 OPENCLAW_CONFIG = {
     'GATEWAY_HOST': os.getenv('OPENCLAW_GATEWAY_HOST', '127.0.0.1'),
     'GATEWAY_PORT': int(os.getenv('OPENCLAW_GATEWAY_PORT', '18789')),
     'LLM_PROVIDER': os.getenv('OPENCLAW_LLM_PROVIDER', 'ollama'),
     'LLM_BASE_URL': os.getenv('OPENCLAW_LLM_BASE_URL', 'http://localhost:11434'),
-    'MAIN_MODEL': os.getenv('OPENCLAW_MAIN_MODEL', 'qwen2.5:14b'),
-    'CODE_MODEL': os.getenv('OPENCLAW_CODE_MODEL', 'deepseek-coder-v2:lite'),
-    'VISION_MODEL': os.getenv('OPENCLAW_VISION_MODEL', 'qwen2.5-vl:7b'),
+    'MAIN_MODEL': os.getenv('OPENCLAW_MAIN_MODEL', 'qwen3:8b'),
+    'CODE_MODEL': os.getenv('OPENCLAW_CODE_MODEL', 'deepseek-r1:8b'),
+    'VISION_MODEL': os.getenv('OPENCLAW_VISION_MODEL', 'qwen3-vl:8b'),
     'EMBEDDING_MODEL': os.getenv('OPENCLAW_EMBEDDING_MODEL', 'bge-m3'),
     'MAX_AGENTS': int(os.getenv('OPENCLAW_MAX_AGENTS', '100')),
     'SESSION_TIMEOUT': int(os.getenv('OPENCLAW_SESSION_TIMEOUT', '3600')),
@@ -321,38 +347,95 @@ CACHE_TTL = {
     'DOCUMENT_OPTIONS': 3600,
 }
 
+LOG_DIR = BASE_DIR / 'logs'
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {
         'verbose': {
-            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            '()': 'core.logging_config.SafeVerboseFormatter',
+            'format': '[{asctime}] [{levelname}] [{name}] [{trace_id}] {message}',
             'style': '{',
         },
         'simple': {
-            'format': '{levelname} {asctime} {message}',
+            'format': '[{levelname}] {message}',
             'style': '{',
         },
-        'request': {
-            'format': '{asctime} {message}',
+        'celery': {
+            'format': '[{asctime}] [{levelname}] [celery.{name}] {message}',
             'style': '{',
+        },
+    },
+    'filters': {
+        'sensitive_filter': {
+            '()': 'core.logging_config.SensitiveFilter',
+        },
+        'trace_id_filter': {
+            '()': 'core.logging_config.TraceIdFilter',
         },
     },
     'handlers': {
         'console': {
+            'level': 'DEBUG',
             'class': 'logging.StreamHandler',
             'formatter': 'simple',
+            'filters': ['sensitive_filter'],
         },
         'file': {
+            'level': 'INFO',
             'class': 'logging.handlers.RotatingFileHandler',
-            'filename': BASE_DIR / 'logs' / 'app.log',
+            'filename': LOG_DIR / 'app.log',
             'maxBytes': 10 * 1024 * 1024,
-            'backupCount': 5,
+            'backupCount': 10,
             'formatter': 'verbose',
+            'filters': ['sensitive_filter', 'trace_id_filter'],
+            'encoding': 'utf-8',
+        },
+        'error_file': {
+            'level': 'ERROR',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': LOG_DIR / 'error.log',
+            'maxBytes': 10 * 1024 * 1024,
+            'backupCount': 10,
+            'formatter': 'verbose',
+            'filters': ['sensitive_filter', 'trace_id_filter'],
+            'encoding': 'utf-8',
+        },
+        'api_file': {
+            'level': 'INFO',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': LOG_DIR / 'api.log',
+            'maxBytes': 10 * 1024 * 1024,
+            'backupCount': 20,
+            'formatter': 'verbose',
+            'filters': ['sensitive_filter', 'trace_id_filter'],
+            'encoding': 'utf-8',
+        },
+        'celery_file': {
+            'level': 'INFO',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': LOG_DIR / 'celery.log',
+            'maxBytes': 20 * 1024 * 1024,
+            'backupCount': 15,
+            'formatter': 'celery',
+            'filters': ['sensitive_filter'],
+            'encoding': 'utf-8',
+        },
+        'celery_error_file': {
+            'level': 'ERROR',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': LOG_DIR / 'celery_error.log',
+            'maxBytes': 10 * 1024 * 1024,
+            'backupCount': 10,
+            'formatter': 'celery',
+            'filters': ['sensitive_filter'],
+            'encoding': 'utf-8',
         },
     },
     'root': {
-        'handlers': ['console', 'file'],
+        'handlers': ['console', 'file', 'error_file'],
         'level': 'INFO',
     },
     'loggers': {
@@ -361,9 +444,49 @@ LOGGING = {
             'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
             'propagate': False,
         },
+        'django.request': {
+            'handlers': ['api_file', 'error_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'django.db.backends': {
+            'handlers': ['file'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'apps': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'api_request': {
+            'handlers': ['api_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
         'crawler': {
             'handlers': ['console', 'file'],
             'level': 'DEBUG',
+            'propagate': False,
+        },
+        'celery': {
+            'handlers': ['celery_file', 'celery_error_file', 'console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'celery.worker': {
+            'handlers': ['celery_file', 'celery_error_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'celery.beat': {
+            'handlers': ['celery_file', 'celery_error_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'celery.task': {
+            'handlers': ['celery_file', 'celery_error_file'],
+            'level': 'INFO',
             'propagate': False,
         },
     },

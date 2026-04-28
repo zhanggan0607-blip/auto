@@ -55,10 +55,10 @@
               <el-table-column prop="name" label="英文名" width="120" />
               <el-table-column prop="files" label="包含文件" min-width="200">
                 <template #default="{ row }">
-                  <el-tag v-for="file in row.files.slice(0, 5)" :key="file" size="small" class="file-tag">
+                  <el-tag v-for="file in (row.files || []).slice(0, 5)" :key="file" size="small" class="file-tag">
                     {{ file }}
                   </el-tag>
-                  <span v-if="row.files.length > 5">...</span>
+                  <span v-if="(row.files || []).length > 5">...</span>
                 </template>
               </el-table-column>
               <el-table-column label="功能" width="150">
@@ -121,7 +121,7 @@
               </div>
             </template>
             <div class="routes-list">
-              <div v-for="route in knowledge.api_routes.slice(0, 30)" :key="route.path" class="route-item">
+              <div v-for="route in (knowledge.api_routes || []).slice(0, 30)" :key="route.path" class="route-item">
                 <el-tag size="small" type="info" class="route-method">{{ route.app }}</el-tag>
                 <span class="route-path">{{ route.path }}</span>
               </div>
@@ -140,6 +140,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, DocumentCopy, Connection, Document, Link } from '@element-plus/icons-vue'
+import { PageHeader } from '@/components'
 import request from '@/utils/request'
 
 const loading = ref(false)
@@ -150,7 +151,7 @@ const context = ref('')
 const loadKnowledge = async () => {
   loading.value = true
   try {
-    const res = await request.get('/api/v1/knowledge/')
+    const res = await request.get('/v1/knowledge/')
     knowledge.value = res.data || {}
   } catch (error) {
     ElMessage.error('获取项目知识库失败')
@@ -162,7 +163,7 @@ const loadKnowledge = async () => {
 const loadContext = async () => {
   contextLoading.value = true
   try {
-    const res = await request.get('/api/v1/knowledge/context/')
+    const res = await request.get('/v1/knowledge/context/')
     context.value = res.data?.context || ''
     ElMessage.success('上下文已生成')
   } catch (error) {

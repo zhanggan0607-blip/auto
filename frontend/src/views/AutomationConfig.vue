@@ -1,4 +1,4 @@
-<template>
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<template>
   <div class="automation-config-page">
     <div class="page-header">
       <div class="header-title">
@@ -511,6 +511,8 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Plus } from '@element-plus/icons-vue'
 import { automationConfigApi } from '@/api/automationConfig'
+import { parseListResponse } from '@/utils/response-parser'
+import { useFormDraft } from '@/composables/useFormDraft'
 
 const configList = ref([])
 const currentConfig = ref(null)
@@ -588,10 +590,25 @@ const createForm = reactive({
   is_default: false
 })
 
+const allConfigForms = reactive({
+  decision: decisionForm,
+  match: matchForm,
+  review: reviewForm,
+  risk: riskForm,
+  crawl: crawlForm,
+  notification: notificationForm
+})
+
+const { clearDraft: clearConfigDraft } = useFormDraft(allConfigForms, {
+  key: 'automation:config',
+  context: () => ({ configId: currentConfig.value?.id, activeTab: activeTab.value })
+})
+
 const loadConfigs = async () => {
   try {
     const res = await automationConfigApi.list()
-    configList.value = res.data?.list || res.data || []
+    const { list } = parseListResponse(res)
+    configList.value = list
   } catch (error) {
     console.error('加载配置列表失败:', error)
   }
@@ -685,6 +702,7 @@ const deleteConfig = async (config) => {
 const saveDecisionConfig = async () => {
   try {
     await automationConfigApi.updateDecisionConfig(currentConfig.value.id, decisionForm)
+    clearConfigDraft()
     ElMessage.success('AI决策配置已保存')
     await loadConfigs()
   } catch (error) {
@@ -695,6 +713,7 @@ const saveDecisionConfig = async () => {
 const saveMatchConfig = async () => {
   try {
     await automationConfigApi.updateMatchConfig(currentConfig.value.id, matchForm)
+    clearConfigDraft()
     ElMessage.success('自动匹配配置已保存')
     await loadConfigs()
   } catch (error) {
@@ -705,6 +724,7 @@ const saveMatchConfig = async () => {
 const saveReviewConfig = async () => {
   try {
     await automationConfigApi.updateReviewConfig(currentConfig.value.id, reviewForm)
+    clearConfigDraft()
     ElMessage.success('文档审核配置已保存')
     await loadConfigs()
   } catch (error) {
@@ -715,6 +735,7 @@ const saveReviewConfig = async () => {
 const saveRiskConfig = async () => {
   try {
     await automationConfigApi.updateRiskConfig(currentConfig.value.id, riskForm)
+    clearConfigDraft()
     ElMessage.success('风险控制配置已保存')
     await loadConfigs()
   } catch (error) {
@@ -725,6 +746,7 @@ const saveRiskConfig = async () => {
 const saveCrawlConfig = async () => {
   try {
     await automationConfigApi.updateCrawlConfig(currentConfig.value.id, crawlForm)
+    clearConfigDraft()
     ElMessage.success('采集配置已保存')
     await loadConfigs()
   } catch (error) {
@@ -735,6 +757,7 @@ const saveCrawlConfig = async () => {
 const saveNotificationConfig = async () => {
   try {
     await automationConfigApi.updateNotificationConfig(currentConfig.value.id, notificationForm)
+    clearConfigDraft()
     ElMessage.success('通知配置已保存')
     await loadConfigs()
   } catch (error) {
@@ -767,7 +790,7 @@ onMounted(() => {
 
     .page-subtitle {
       margin: 0;
-      color: #909399;
+      color: #64748B;
       font-size: 14px;
     }
   }
@@ -809,22 +832,22 @@ onMounted(() => {
 
 .config-item {
   padding: 15px;
-  border-bottom: 1px solid #ebeef5;
+  border-bottom: 1px solid #E2E8F0;
   cursor: pointer;
   transition: all 0.3s;
 
   &:hover {
-    background-color: #f5f7fa;
+    background-color: #F1F5F9;
   }
 
   &.active {
-    background-color: #ecf5ff;
-    border-left: 3px solid #409eff;
+    background-color: #EFF6FF;
+    border-left: 3px solid #3B82F6;
   }
 
   &.default {
     .config-name {
-      color: #67c23a;
+      color: #16A34A;
     }
   }
 
@@ -838,7 +861,7 @@ onMounted(() => {
 
   .config-desc {
     font-size: 12px;
-    color: #909399;
+    color: #64748B;
     margin-bottom: 8px;
   }
 
@@ -850,13 +873,13 @@ onMounted(() => {
 
 .form-help {
   margin-left: 10px;
-  color: #909399;
+  color: #64748B;
   font-size: 12px;
 }
 
 .weight-value {
   margin-left: 10px;
-  color: #409eff;
+  color: #3B82F6;
   font-weight: 600;
 }
 

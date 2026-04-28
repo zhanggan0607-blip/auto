@@ -80,6 +80,8 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/store/user'
 import { authApi } from '@/api/auth'
+import { parseListResponse } from '@/utils/response-parser'
+import { useFormDraft } from '@/composables/useFormDraft'
 
 const userStore = useUserStore()
 
@@ -89,6 +91,11 @@ const userForm = reactive({
   phone: '',
   email: '',
   company_name: ''
+})
+
+const { clearDraft: clearUserDraft } = useFormDraft(userForm, {
+  key: 'profile:user',
+  promptOnRestore: false
 })
 
 const passwordForm = reactive({
@@ -119,6 +126,7 @@ const updateUserInfo = async () => {
       company_name: userForm.company_name
     })
     ElMessage.success('保存成功')
+    clearUserDraft()
     userStore.fetchUserInfo()
   } catch (error) {
     ElMessage.error('保存失败')
@@ -142,7 +150,8 @@ const changePassword = async () => {
 const fetchLoginLogs = async () => {
   try {
     const res = await authApi.getLoginLogs({ page_size: 10 })
-    loginLogs.value = res.data?.list || []
+    const { list } = parseListResponse(res)
+    loginLogs.value = list
   } catch (error) {
     console.error('获取登录日志失败:', error)
   }

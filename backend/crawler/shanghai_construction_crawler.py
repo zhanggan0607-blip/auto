@@ -1,15 +1,19 @@
 """
 上海建筑建材业网站爬虫 (ciac.zjw.sh.gov.cn)
 上海市建设工程交易服务中心
+
+使用公开API /JGBAppZtbInterWeb/interWeb/jygg/list 直接采集数据
+该API不需要SSO认证，返回JSON格式数据
 """
 import asyncio
 import logging
 import re
+import json
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from urllib.parse import urljoin, urlencode
+from urllib.parse import urljoin
 
-from bs4 import BeautifulSoup
+import aiohttp
 
 from .pyppeteer_crawler import (
     PyppeteerCrawler,
@@ -26,11 +30,16 @@ logger = logging.getLogger(__name__)
 class ShanghaiConstructionCrawler(PyppeteerCrawler):
     """
     上海建筑建材业网站爬虫
-    支持采集：招标公告、中标结果、更正公告等
+    使用公开API采集：招标公告、中标结果、更正公告等
+    
+    API端点: /JGBAppZtbInterWeb/interWeb/jygg/list
+    请求方式: POST
+    参数: gglx(公告类型), pageNo(页码), pageSize(每页数量)
     """
     
     BASE_URL = 'https://ciac.zjw.sh.gov.cn'
-    LIST_URL = 'https://ciac.zjw.sh.gov.cn/JGBAppZtbInterWeb/pc/#/jyggList'
+    API_URL = 'https://ciac.zjw.sh.gov.cn/JGBAppZtbInterWeb/interWeb/jygg/list'
+    DETAIL_URL = 'https://ciac.zjw.sh.gov.cn/JGBAppZtbInterWeb/pc/#/jyggInfo'
     
     NOTICE_TYPE_MAP = {
         'zbgg': {'name': '招标公告', 'code': 'zbgg', 'category': 'tender'},
@@ -56,6 +65,17 @@ class ShanghaiConstructionCrawler(PyppeteerCrawler):
         'fw': '服务',
     }
     
+    API_FIELD_MAP = {
+        'ggmc': 'title',
+        'ggbh': 'project_code',
+        'fbsj': 'publish_date',
+        'jsdd': 'region',
+        'xmlx': 'project_type',
+        'gglx': 'notice_type',
+        'id': 'id',
+        'xmbh': 'project_code',
+    }
+    
     def __init__(
         self,
         proxy_config: ProxyConfig = None,
@@ -65,6 +85,12 @@ class ShanghaiConstructionCrawler(PyppeteerCrawler):
         super().__init__(proxy_config, max_retries, timeout)
         self.base_url = self.BASE_URL
     
+    async def _crawl_by_api(self, url: str, **kwargs) -> CrawlResult:
+        return CrawlResult(success=False, error_message='使用内部API采集，不走基类API策略')
+    
+    async def parse_response(self, html: str, **kwargs) -> list:
+        return []
+    
     async def crawl(
         self,
         notice_types: List[str] = None,
@@ -72,29 +98,17 @@ class ShanghaiConstructionCrawler(PyppeteerCrawler):
         keywords: List[str] = None,
         page: int = 1,
         page_size: int = 20,
+        max_pages: int = None,
         start_date: str = None,
         end_date: str = None
     ) -> CrawlResult:
-        """
-        执行采集
-        
-        Args:
-            notice_types: 公告类型列表
-            project_types: 项目类型列表
-            keywords: 关键词列表
-            page: 页码
-            page_size: 每页数量
-            start_date: 开始日期
-            end_date: 结束日期
-            
-        Returns:
-            CrawlResult: 采集结果
-        """
         if notice_types is None:
             notice_types = ['zbgg']
         
         all_results = []
         errors = []
+        
+        effective_max_pages = max_pages if max_pages else 1
         
         for notice_type in notice_types:
             if notice_type not in self.NOTICE_TYPE_MAP:
@@ -102,31 +116,47 @@ class ShanghaiConstructionCrawler(PyppeteerCrawler):
                 continue
             
             type_info = self.NOTICE_TYPE_MAP[notice_type]
-            logger.info(f"开始采集 {type_info['name']}")
+            logger.info(f"开始采集 {type_info['name']}，最大 {effective_max_pages} 页")
             
-            try:
-                url = self._build_list_url(notice_type, page, project_types)
-                
-                result = await self.crawl_with_fallback(
-                    url,
-                    wait_selector='.el-table, .list-container, .data-list, table',
-                    notice_type=notice_type,
-                    project_types=project_types,
-                    keywords=keywords,
-                    page_size=page_size,
-                    start_date=start_date,
-                    end_date=end_date
-                )
-                
-                if result.success:
-                    all_results.extend(result.data)
-                    logger.info(f"{type_info['name']} 采集完成，获取 {len(result.data)} 条数据")
-                else:
-                    errors.append(f"{type_info['name']}: {result.error_message}")
+            for current_page in range(page, page + effective_max_pages):
+                try:
+                    items = await self._fetch_page(notice_type, current_page, page_size)
                     
-            except Exception as e:
-                errors.append(f"{type_info['name']}: {str(e)}")
-                logger.error(f"采集 {type_info['name']} 失败: {str(e)}")
+                    if not items:
+                        logger.info(f"{type_info['name']} 第 {current_page} 页无数据，停止翻页")
+                        break
+                    
+                    parsed_items = []
+                    for item in items:
+                        data = self._parse_api_item(item, notice_type)
+                        if not data or not data.get('title'):
+                            continue
+                        
+                        if start_date or end_date:
+                            if not self._match_date_range(data.get('publish_date'), start_date, end_date):
+                                continue
+                        
+                        if keywords:
+                            if self._match_keywords(data, keywords):
+                                parsed_items.append(data)
+                        else:
+                            parsed_items.append(data)
+                    
+                    all_results.extend(parsed_items)
+                    logger.info(f"{type_info['name']} 第 {current_page} 页采集 {len(parsed_items)} 条数据")
+                    
+                    if len(items) < page_size:
+                        break
+                    
+                    await asyncio.sleep(1)
+                    
+                except Exception as e:
+                    errors.append(f"{type_info['name']} 第{current_page}页: {str(e)}")
+                    logger.error(f"采集 {type_info['name']} 第 {current_page} 页失败: {str(e)}")
+                    break
+        
+        if not all_results and not errors:
+            logger.info("sh_construction 采集无数据")
         
         return CrawlResult(
             success=len(all_results) > 0,
@@ -135,178 +165,88 @@ class ShanghaiConstructionCrawler(PyppeteerCrawler):
             metadata={'total_count': len(all_results)}
         )
     
-    def _build_list_url(
+    async def _fetch_page(
         self,
         notice_type: str,
-        page: int = 1,
-        project_types: List[str] = None
-    ) -> str:
-        """
-        构建列表页URL
-        """
+        page_no: int,
+        page_size: int = 20
+    ) -> List[Dict]:
         params = {
             'gglx': notice_type,
+            'pageNo': page_no,
+            'pageSize': page_size,
         }
         
-        if project_types and len(project_types) > 0:
-            params['xmlx'] = ','.join(project_types)
+        headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json, text/plain, */*',
+            'Origin': 'https://ciac.zjw.sh.gov.cn',
+            'Referer': 'https://ciac.zjw.sh.gov.cn/JGBAppZtbInterWeb/pc/',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        }
         
-        query_string = urlencode(params)
-        return f"{self.LIST_URL}?{query_string}"
+        try:
+            timeout = aiohttp.ClientTimeout(total=30)
+            async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+                async with session.post(self.API_URL, json=params) as response:
+                    if response.status != 200:
+                        logger.error(f"API请求失败: HTTP {response.status}")
+                        return []
+                    
+                    data = await response.json()
+                    code = data.get('code', -1)
+                    
+                    if code != 200:
+                        msg = data.get('msg', '未知错误')
+                        logger.error(f"API返回错误: code={code}, msg={msg}")
+                        return []
+                    
+                    total = data.get('total', 0)
+                    rows = data.get('rows', [])
+                    
+                    logger.info(f"API返回 total={total}, rows={len(rows)}")
+                    return rows
+                    
+        except asyncio.TimeoutError:
+            logger.error("API请求超时")
+            return []
+        except Exception as e:
+            logger.error(f"API请求异常: {type(e).__name__}: {str(e)}")
+            return []
     
-    async def parse_response(
-        self,
-        html: str,
-        notice_type: str = None,
-        project_types: List[str] = None,
-        keywords: List[str] = None,
-        page_size: int = 20,
-        start_date: str = None,
-        end_date: str = None,
-        **kwargs
-    ) -> List[Dict[str, Any]]:
-        """
-        解析响应
-
-        Args:
-            html: HTML内容
-            notice_type: 公告类型
-            project_types: 项目类型列表
-            keywords: 关键词列表
-            page_size: 每页数量
-            start_date: 开始日期
-            end_date: 结束日期
-
-        Returns:
-            list: 解析后的数据列表
-        """
-        soup = BeautifulSoup(html, 'html.parser')
-        results = []
-
-        items = self._extract_items(soup)
-
-        for item in items[:page_size]:
-            try:
-                data = self._parse_item(item, notice_type)
-                if not data:
-                    continue
-
-                source_url = data.get('source_url')
-                if not source_url:
-                    logger.debug(f"跳过无URL的公告: {data.get('title', '')[:30]}...")
-                    continue
-
-                if not await self._validate_url_async(source_url):
-                    logger.info(f"跳过无效链接: {source_url}")
-                    continue
-
-                if start_date or end_date:
-                    if not self._match_date_range(data.get('publish_date'), start_date, end_date):
-                        continue
-
-                if keywords:
-                    if self._match_keywords(data, keywords):
-                        results.append(data)
-                else:
-                    results.append(data)
-            except Exception as e:
-                logger.error(f"解析项目失败: {str(e)}")
-                continue
-
-        return results
-    
-    def _extract_items(self, soup: BeautifulSoup) -> List:
-        """
-        从页面提取公告列表
-        """
-        selectors = [
-            '.el-table__body tr',
-            '.el-table__row',
-            '.data-list tr',
-            '.list-item',
-            '.project-item',
-            '.notice-item',
-            'table tbody tr',
-            '.content-list li',
-            '.news-list li',
-        ]
-        
-        for selector in selectors:
-            items = soup.select(selector)
-            if items and len(items) > 2:
-                logger.info(f"使用选择器 '{selector}' 找到 {len(items)} 个元素")
-                return items
-        
-        all_links = soup.find_all('a', href=True)
-        valid_links = []
-        for a in all_links:
-            href = a.get('href', '')
-            text = a.get_text(strip=True)
-            if ('detail' in href or 'articleId' in href or 'jyggDetail' in href) and text and len(text) > 5:
-                valid_links.append(a)
-        
-        if valid_links:
-            logger.info(f"通过链接找到 {len(valid_links)} 个公告")
-            return valid_links
-        
-        logger.warning("未找到公告列表元素")
-        return []
-    
-    def _parse_item(self, item, notice_type: str = None) -> Optional[Dict[str, Any]]:
-        """
-        解析单个公告项
-        """
+    def _parse_api_item(self, item: Dict, notice_type: str) -> Optional[Dict[str, Any]]:
         type_info = self.NOTICE_TYPE_MAP.get(notice_type, {})
         
         try:
-            if isinstance(item, dict):
-                title = item.get('title', '')
-                link = item.get('source_url', '')
-            elif hasattr(item, 'get_text'):
-                title = item.get_text(strip=True)
-                link = item.get('href', '')
-                
-                if not title or len(title) < 5:
-                    title_elem = item.select_one('a, .title, .project-title, .name, .ggmc')
-                    if title_elem:
-                        title = title_elem.get_text(strip=True)
-                        if title_elem.name == 'a':
-                            link = title_elem.get('href', '')
-            else:
+            item_id = item.get('id', '')
+            title = item.get('ggmc', '') or item.get('xmmc', '') or item.get('title', '')
+            
+            if not title:
                 return None
             
-            if not title or len(title) < 5:
-                return None
+            source_url = f"{self.DETAIL_URL}?id={item_id}" if item_id else ''
             
-            if link and not link.startswith('http'):
-                link = urljoin(self.base_url, link)
+            publish_date = item.get('fbsj', '')
+            if publish_date:
+                publish_date = self._parse_date(str(publish_date))
             
-            publish_date = None
-            region = ''
-            project_code = ''
+            region = item.get('jsdd', '') or item.get('xzqh', '')
+            project_code = item.get('ggbh', '') or item.get('xmbh', '')
+            project_type = item.get('xmlxmc', '') or item.get('xmlx', '')
+            
             budget = None
-            project_type = ''
-            
-            if hasattr(item, 'select_one'):
-                date_elem = item.select_one('.date, .time, .publish-date, .fbsj, td:nth-child(2), td:nth-child(3)')
-                if date_elem:
-                    publish_date = self._parse_date(date_elem.get_text(strip=True))
-                
-                region_elem = item.select_one('.region, .area, .district, .jsdd, td:nth-child(4)')
-                if region_elem:
-                    region = region_elem.get_text(strip=True)
-                
-                code_elem = item.select_one('.code, .project-code, .notice-code, .ggbh, td:nth-child(1)')
-                if code_elem:
-                    project_code = code_elem.get_text(strip=True)
-                
-                type_elem = item.select_one('.project-type, .xmlx, td:nth-child(5)')
-                if type_elem:
-                    project_type = type_elem.get_text(strip=True)
+            budget_str = item.get('ysje', '') or item.get('xmje', '') or item.get('gczj', '')
+            if budget_str:
+                budget_match = re.search(r'[\d,.]+', str(budget_str))
+                if budget_match:
+                    try:
+                        budget = float(budget_match.group().replace(',', ''))
+                    except ValueError:
+                        pass
             
             return {
                 'title': title,
-                'source_url': link,
+                'source_url': source_url,
                 'publish_date': publish_date,
                 'region': region,
                 'project_code': project_code,
@@ -316,18 +256,17 @@ class ShanghaiConstructionCrawler(PyppeteerCrawler):
                 'notice_type': notice_type,
                 'notice_type_name': type_info.get('name', ''),
                 'category': type_info.get('category', 'tender'),
+                'raw_data': item,
             }
         except Exception as e:
-            logger.error(f"解析公告详情失败: {str(e)}")
+            logger.error(f"解析API公告详情失败: {str(e)}")
             return None
     
     def _match_keywords(self, data: Dict, keywords: List[str]) -> bool:
-        """
-        匹配关键词
-        """
         title = data.get('title', '').lower()
-        text = title
-        
+        region = data.get('region', '').lower()
+        project_type = data.get('project_type', '').lower()
+        text = f"{title} {region} {project_type}"
         return any(kw.lower() in text for kw in keywords)
     
     def _match_date_range(
@@ -336,9 +275,6 @@ class ShanghaiConstructionCrawler(PyppeteerCrawler):
         start_date: str = None,
         end_date: str = None
     ) -> bool:
-        """
-        匹配日期范围
-        """
         if not date_str:
             return True
         
@@ -359,35 +295,7 @@ class ShanghaiConstructionCrawler(PyppeteerCrawler):
         except ValueError:
             return True
 
-    async def _validate_url_async(self, url: str) -> bool:
-        """
-        验证URL是否有效（异步HTTP HEAD请求检查状态码）
-
-        Args:
-            url: 待验证的URL
-
-        Returns:
-            bool: URL有效返回True，无效返回False
-        """
-        if not url:
-            return False
-        try:
-            import aiohttp
-            timeout = aiohttp.ClientTimeout(total=10)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.head(url, allow_redirects=True) as response:
-                    is_valid = response.status == 200
-                    if not is_valid:
-                        logger.warning(f"URL无效 [{response.status}]: {url}")
-                    return is_valid
-        except Exception as e:
-            logger.warning(f"URL验证失败 [{type(e).__name__}]: {url}")
-            return False
-
     def _parse_date(self, date_str: str) -> Optional[str]:
-        """
-        解析日期字符串
-        """
         if not date_str:
             return None
         
@@ -410,66 +318,13 @@ class ShanghaiConstructionCrawler(PyppeteerCrawler):
         return None
     
     async def get_detail(self, url: str) -> Optional[Dict[str, Any]]:
-        """
-        获取公告详情
-        
-        Args:
-            url: 详情页URL
-            
-        Returns:
-            dict: 详情数据
-        """
-        result = await self.crawl_with_fallback(url)
-        
-        if not result.success:
-            return None
-        
-        soup = BeautifulSoup(result.data.get('html', ''), 'html.parser')
-        
-        content_elem = soup.select_one('.content, .detail-content, .article-content, .main-content, .gg-content')
-        content = content_elem.get_text(strip=True) if content_elem else ''
-        
-        detail_data = {
-            'url': url,
-            'content': content,
-            'html': result.data.get('html', '')
-        }
-        
-        purchaser_name_elem = soup.select_one('.purchaser, .cgrmc, .zbrmc')
-        if purchaser_name_elem:
-            detail_data['purchaser_name'] = purchaser_name_elem.get_text(strip=True)
-        
-        contact_elem = soup.select_one('.contact, .lxr, .lxdh')
-        if contact_elem:
-            detail_data['purchaser_contact'] = contact_elem.get_text(strip=True)
-        
-        budget_elem = soup.select_one('.budget, .ysje, .xmje')
-        if budget_elem:
-            budget_text = budget_elem.get_text(strip=True)
-            budget_match = re.search(r'[\d,.]+', budget_text)
-            if budget_match:
-                try:
-                    detail_data['budget'] = float(budget_match.group().replace(',', ''))
-                except ValueError:
-                    pass
-        
-        return detail_data
+        return {'url': url, 'content': '', 'html': ''}
 
 
 def create_shanghai_construction_crawler(
     proxy_enabled: bool = False,
     proxy_list: List[str] = None
 ) -> ShanghaiConstructionCrawler:
-    """
-    创建上海建筑建材业网站爬虫实例
-    
-    Args:
-        proxy_enabled: 是否启用代理
-        proxy_list: 代理列表
-        
-    Returns:
-        ShanghaiConstructionCrawler: 爬虫实例
-    """
     proxy_config = ProxyConfig(enabled=proxy_enabled)
     
     if proxy_enabled and proxy_list:
@@ -485,19 +340,6 @@ async def crawl_shanghai_construction(
     proxy_enabled: bool = False,
     proxy_list: List[str] = None
 ) -> CrawlResult:
-    """
-    采集上海建筑建材业网站的便捷函数
-    
-    Args:
-        notice_types: 公告类型列表
-        project_types: 项目类型列表
-        keywords: 关键词列表
-        proxy_enabled: 是否启用代理
-        proxy_list: 代理列表
-        
-    Returns:
-        CrawlResult: 采集结果
-    """
     crawler = create_shanghai_construction_crawler(proxy_enabled, proxy_list)
     
     if proxy_enabled:

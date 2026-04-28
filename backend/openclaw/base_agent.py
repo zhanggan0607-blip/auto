@@ -405,32 +405,11 @@ class BaseAgent(ABC):
         data: Dict = None,
         timeout: int = 30
     ) -> Dict:
-        """
-        HTTP请求工具
-        """
-        from utils.url_security import is_url_safe
-
-        is_safe, reason = is_url_safe(url)
-        if not is_safe:
-            return {'error': f'URL安全验证失败: {reason}'}
-
-        import requests
-
-        try:
-            if method.upper() == 'GET':
-                response = requests.get(url, headers=headers, params=data, timeout=timeout)
-            elif method.upper() == 'POST':
-                response = requests.post(url, headers=headers, json=data, timeout=timeout)
-            else:
-                return {'error': f'Unsupported method: {method}'}
-
-            return {
-                'success': True,
-                'status_code': response.status_code,
-                'data': response.text
-            }
-        except Exception as e:
-            return {'error': str(e)}
+        from common.utils.http_client import async_http_request
+        resp = await async_http_request(
+            method, url, headers=headers, data=data, timeout=timeout
+        )
+        return resp.to_dict()
     
     def _tool_read_memory(self, key: str = None) -> Any:
         """
@@ -461,16 +440,57 @@ class BaseAgent(ABC):
     
     def add_memory(self, key: str, value: Any):
         """
-        添加到记忆
+        添加到记忆（同时持久化）
         """
         self.context.memory[key] = value
         self.context.updated_at = datetime.now()
-    
+        self._persist_memory(key, value)
+
     def get_memory(self, key: str, default: Any = None) -> Any:
         """
-        从记忆获取
+        从记忆获取（先查内存，再查持久化）
         """
-        return self.context.memory.get(key, default)
+        if key in self.context.memory:
+            return self.context.memory[key]
+
+        persisted = self._load_persisted_memory(key)
+        if persisted is not None:
+            self.context.memory[key] = persisted
+            return persisted
+
+        return default
+
+    def _persist_memory(self, key: str, value: Any):
+        """
+        持久化记忆到数据库
+        """
+        try:
+            from openclaw.persistent_memory import persistent_memory_service
+            persistent_memory_service.save_memory(
+                agent_id=self.agent_id,
+                agent_type=self.agent_type.value if self.agent_type else 'unknown',
+                key=key,
+                value=value,
+                session_id=self.session_id,
+                scope='session',
+            )
+        except Exception as e:
+            logger.debug(f"记忆持久化失败(非致命): {str(e)}")
+
+    def _load_persisted_memory(self, key: str) -> Any:
+        """
+        从数据库加载持久化记忆
+        """
+        try:
+            from openclaw.persistent_memory import persistent_memory_service
+            return persistent_memory_service.load_memory(
+                agent_type=self.agent_type.value if self.agent_type else 'unknown',
+                key=key,
+                session_id=self.session_id,
+            )
+        except Exception as e:
+            logger.debug(f"加载持久化记忆失败(非致命): {str(e)}")
+            return None
     
     def add_message(self, role: str, content: Any, metadata: Dict = None):
         """
@@ -614,7 +634,84 @@ class BaseAgent(ABC):
                 error=str(e)
             )
             return error_result
-    
+
+    def handle_message(self, message) -> Any:
+        """
+        处理收到的消息（支持AgentRouter协议）
+
+        Args:
+            message: AgentMessage消息对象
+
+        Returns:
+            Any: 处理结果
+        """
+        from openclaw.messaging.protocol import AgentMessage, MessageType
+
+        if isinstance(message, dict):
+            message = AgentMessage.from_dict(message)
+
+        logger.info(f"Agent {self.agent_id} 收到消息: type={message.msg_type.value}, from={message.sender_id}")
+
+        if message.msg_type == MessageType.TASK:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                task_result = loop.run_until_complete(self.run(message.content))
+            finally:
+                loop.close()
+            return task_result.to_dict() if hasattr(task_result, 'to_dict') else task_result
+
+        elif message.msg_type == MessageType.EVENT:
+            self.emit(message.content.get('event'), message.content.get('data'))
+            return {'status': 'event_processed'}
+
+        elif message.msg_type == MessageType.HEARTBEAT:
+            return {
+                'status': 'alive',
+                'agent_id': self.agent_id,
+                'agent_type': self.agent_type.value if self.agent_type else None,
+                'current_status': self.status.value
+            }
+
+        else:
+            return {'status': 'unknown_message_type'}
+
+    async def handle_message_async(self, message) -> Any:
+        """
+        异步处理收到的消息（支持AgentRouter协议）
+
+        Args:
+            message: AgentMessage消息对象
+
+        Returns:
+            Any: 处理结果
+        """
+        from openclaw.messaging.protocol import AgentMessage, MessageType
+
+        if isinstance(message, dict):
+            message = AgentMessage.from_dict(message)
+
+        logger.info(f"Agent {self.agent_id} 异步收到消息: type={message.msg_type.value}, from={message.sender_id}")
+
+        if message.msg_type == MessageType.TASK:
+            result = await self.run(message.content)
+            return result.to_dict() if hasattr(result, 'to_dict') else result
+
+        elif message.msg_type == MessageType.EVENT:
+            self.emit(message.content.get('event'), message.content.get('data'))
+            return {'status': 'event_processed'}
+
+        elif message.msg_type == MessageType.HEARTBEAT:
+            return {
+                'status': 'alive',
+                'agent_id': self.agent_id,
+                'agent_type': self.agent_type.value if self.agent_type else None,
+                'current_status': self.status.value
+            }
+
+        else:
+            return {'status': 'unknown_message_type'}
+
     def to_dict(self) -> Dict[str, Any]:
         """
         转换为字典

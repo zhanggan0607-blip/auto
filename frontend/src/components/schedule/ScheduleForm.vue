@@ -93,6 +93,19 @@
       </div>
     </el-form-item>
 
+    <el-form-item label="最大采集页数" prop="max_pages">
+      <el-input-number
+        v-model="formData.max_pages"
+        :min="1"
+        :max="200"
+        :disabled="readonly"
+      />
+      <div class="form-tip">
+        <el-icon><InfoFilled /></el-icon>
+        <span>设置采集的最大页数，防止采集过多数据</span>
+      </div>
+    </el-form-item>
+
     <el-form-item label="搜索关键词" prop="keywords">
       <div class="keyword-section">
         <div class="keyword-tabs">
@@ -374,7 +387,7 @@ defineExpose({
   align-items: center;
   gap: 4px;
   margin-top: 8px;
-  color: #909399;
+  color: #64748B;
   font-size: 12px;
 
   .el-icon {
@@ -384,7 +397,7 @@ defineExpose({
 
 .template-code {
   margin-left: 8px;
-  color: #909399;
+  color: #64748B;
   font-size: 12px;
 }
 
@@ -399,7 +412,7 @@ defineExpose({
 
   .time-desc {
     font-size: 12px;
-    color: #909399;
+    color: #64748B;
   }
 }
 
@@ -409,7 +422,7 @@ defineExpose({
 }
 
 .radio-desc {
-  color: #909399;
+  color: #64748B;
   font-size: 12px;
 }
 
@@ -472,7 +485,7 @@ defineExpose({
   gap: 12px;
 
   .switch-desc {
-    color: #606266;
+    color: #334155;
     font-size: 14px;
   }
 }
@@ -485,14 +498,14 @@ defineExpose({
     display: flex;
     justify-content: space-between;
     margin-top: 4px;
-    color: #909399;
+    color: #64748B;
     font-size: 12px;
   }
 }
 
 .divider-title {
   font-weight: 600;
-  color: #303133;
+  color: #1E293B;
 }
 
 .match-info-alert {

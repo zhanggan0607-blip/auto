@@ -2,6 +2,15 @@
   <div class="page-container">
     <PageHeader :title="pageTitle">
       <template #actions>
+        <el-button
+          v-if="pageMode === 'tenders'"
+          @click="handleCrawlSync"
+          :loading="syncLoading"
+          class="sync-btn"
+        >
+          <el-icon><Refresh /></el-icon>
+          同步采集数据
+        </el-button>
         <el-button type="primary" @click="showCreateDialog" class="primary-action-btn">
           <el-icon><Plus /></el-icon>
           {{ pageMode === 'bids' ? '新建投标记录' : '添加招标' }}
@@ -26,14 +35,40 @@
               class="search-input"
             />
           </el-form-item>
-          <el-form-item label="投标状态">
+          <el-form-item :label="pageMode === 'tenders' ? '招标状态' : '投标状态'">
             <el-select v-model="formData.status" placeholder="请选择" clearable class="search-select">
-              <el-option label="准备中" value="preparing" />
-              <el-option label="已提交" value="submitted" />
-              <el-option label="评审中" value="reviewing" />
-              <el-option label="已中标" value="won" />
-              <el-option label="未中标" value="lost" />
-              <el-option label="已撤回" value="withdrawn" />
+              <template v-if="pageMode === 'tenders'">
+                <el-option label="待处理" value="pending" />
+                <el-option label="处理中" value="processing" />
+                <el-option label="已投标" value="submitted" />
+                <el-option label="已中标" value="won" />
+                <el-option label="未中标" value="lost" />
+                <el-option label="已过期" value="expired" />
+              </template>
+              <template v-else>
+                <el-option label="准备中" value="preparing" />
+                <el-option label="已提交" value="submitted" />
+                <el-option label="评审中" value="reviewing" />
+                <el-option label="已中标" value="won" />
+                <el-option label="未中标" value="lost" />
+                <el-option label="已撤回" value="withdrawn" />
+              </template>
+            </el-select>
+          </el-form-item>
+          <el-form-item label="收藏" v-if="pageMode === 'tenders'">
+            <el-select v-model="formData.is_favorite" placeholder="请选择" clearable class="search-select">
+              <el-option label="已收藏" value="true" />
+              <el-option label="未收藏" value="false" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="来源网站" v-if="pageMode === 'tenders'">
+            <el-select v-model="formData.source_name" placeholder="请选择" clearable class="search-select">
+              <el-option
+                v-for="source in sourceOptions"
+                :key="source.name"
+                :label="source.name"
+                :value="source.name"
+              />
             </el-select>
           </el-form-item>
           <el-form-item label="投标日期">
@@ -75,11 +110,9 @@
           </el-table-column>
           <el-table-column prop="publish_date" label="发布日期" width="120" />
           <el-table-column prop="region" label="地区" width="100" />
-          <el-table-column prop="status" label="状态" width="100">
+          <el-table-column prop="source_name" label="来源网站" width="160">
             <template #default="{ row }">
-              <el-tag :type="getBidStatusType(row.status)" size="small" class="status-tag">
-                {{ getBidStatusText(row.status) }}
-              </el-tag>
+              <span class="source-name-cell">{{ row.source_name || '未知来源' }}</span>
             </template>
           </el-table-column>
           <el-table-column label="原始链接" width="100" align="center">
@@ -88,7 +121,7 @@
                 type="primary"
                 link
                 :disabled="!row.source_url"
-                @click="openSourceUrl(row.source_url)"
+                @click="openSourceUrl(row.source_url, row)"
               >
                 链接
               </el-button>
@@ -216,7 +249,7 @@
               :value="item.id"
             >
               <span>{{ item.title }}</span>
-              <span style="float: right; color: #8492a6; font-size: 12px;">{{ item.project_code }}</span>
+              <span style="float: right; color: #64748B; font-size: 12px;">{{ item.project_code }}</span>
             </el-option>
           </el-select>
         </el-form-item>
@@ -421,34 +454,93 @@
         <el-button type="primary" :loading="submittingResult" @click="submitResultForm">确定</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="sourcePreviewVisible"
+      title="查看原始公告"
+      width="85%"
+      top="3vh"
+      :close-on-click-modal="false"
+      destroy-on-close
+      @close="closeSourcePreview"
+    >
+      <div class="source-preview-container">
+        <div v-if="sourcePreviewLoading" class="source-preview-loading">
+          <el-icon class="is-loading" :size="32"><Refresh /></el-icon>
+          <p>正在获取公告内容，请稍候...</p>
+          <p class="source-preview-tip">首次加载可能需要10-20秒</p>
+        </div>
+        <div v-else-if="sourcePreviewContent" class="source-preview-content" v-html="sourcePreviewContent" />
+        <div v-else-if="sourcePreviewError" class="source-preview-error">
+          <el-icon :size="48" color="#64748B"><WarningFilled /></el-icon>
+          <p>{{ sourcePreviewError }}</p>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="closeSourcePreview">关闭</el-button>
+        <el-button type="primary" @click="openInNewWindow">在新窗口打开</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Plus, Location } from '@element-plus/icons-vue'
+import { Plus, Location, Refresh, WarningFilled } from '@element-plus/icons-vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { bidApi } from '@/api/bid'
 import { tenderApi } from '@/api/tender'
-import { getBidStatusType, getBidStatusText } from '@/store/constants'
+import { getBidStatusType, getBidStatusText, getResultType, getResultText } from '@/store/constants'
 import { useMessage } from '@/composables'
 import { useListPage } from '@/composables/useListPage'
 import { PageHeader, StatCards, SearchForm } from '@/components'
+import { parseListResponse } from '@/utils/response-parser'
 
 const router = useRouter()
 const route = useRoute()
 const message = useMessage()
 
-const pageMode = computed(() => route.query.view === 'tenders' ? 'tenders' : 'bids')
+const pageMode = computed(() => route.query.view === 'bids' ? 'bids' : 'tenders')
 
 const pageTitle = computed(() => pageMode.value === 'tenders' ? '招标项目管理' : '已投标项目管理')
 
+const initialStatus = route.query.status || ''
+const initialFavorite = route.query.is_favorite || ''
+
 const bidFormRef = ref(null)
 const resultFormRef = ref(null)
+const syncLoading = ref(false)
+const sourceOptions = ref([])
+
+const handleCrawlSync = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '将采集数据同步到招标项目列表，是否继续？',
+      '同步确认',
+      { type: 'info', confirmButtonText: '同步', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  syncLoading.value = true
+  try {
+    const res = await tenderApi.crawlSync()
+    const data = res.data || res
+    ElMessage.success(`同步完成: 新增 ${data.created || 0} 条, 更新 ${data.updated || 0} 条, 跳过 ${data.skipped || 0} 条`)
+    listPage.fetchData()
+    fetchStatistics()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || '同步失败')
+  } finally {
+    syncLoading.value = false
+  }
+}
 
 const searchDefaults = {
   keyword: '',
-  status: '',
+  status: initialStatus,
+  is_favorite: initialFavorite,
+  source_name: '',
   dateRange: []
 }
 
@@ -503,15 +595,13 @@ const listPage = useListPage({
         page: params.page,
         page_size: params.page_size,
         keyword: params.keyword,
-        status: params.status
+        status: params.status,
+        is_favorite: params.is_favorite || undefined,
+        source_name: params.source_name || undefined
       }
       const res = await tenderApi.getList(searchParams)
-      let list = res?.results || res?.list || []
-      if (!Array.isArray(list)) {
-        list = []
-      }
-      const total = res?.count || res?.total || list.length
-      return { data: { list, total } }
+      const { list, total } = parseListResponse(res)
+      return { data: { list: Array.isArray(list) ? list : [], total } }
     } else {
       const searchParams = {
         page: params.page,
@@ -521,27 +611,25 @@ const listPage = useListPage({
         end_date: params.dateRange?.[1]
       }
       const res = await bidApi.getList(searchParams)
-
-      let list = res?.data?.list || res?.results || res?.list || []
-      if (!Array.isArray(list)) {
-        list = []
-      }
+      const { list, total } = parseListResponse(res)
+      let filteredList = Array.isArray(list) ? list : []
       if (params.keyword) {
         const kw = params.keyword.toLowerCase()
-        list = list.filter(item =>
+        filteredList = filteredList.filter(item =>
           item.tender_title?.toLowerCase().includes(kw) ||
           item.tender_project_code?.toLowerCase().includes(kw) ||
           item.bid_code?.toLowerCase().includes(kw)
         )
       }
-      const total = res?.data?.pagination?.total || res?.count || list.length
-      return { data: { list, total } }
+      return { data: { list: filteredList, total } }
     }
   },
   deleteApi: (id) => pageMode.value === 'tenders' ? tenderApi.delete(id) : bidApi.delete(id),
   defaultSearchParams: {
     keyword: '',
-    status: '',
+    status: initialStatus,
+    is_favorite: initialFavorite,
+    source_name: '',
     dateRange: []
   },
   onDeleteSuccess: () => {
@@ -551,6 +639,11 @@ const listPage = useListPage({
 
 const createDialogVisible = ref(false)
 const resultDialogVisible = ref(false)
+const sourcePreviewVisible = ref(false)
+const sourcePreviewUrl = ref('')
+const sourcePreviewLoading = ref(false)
+const sourcePreviewContent = ref('')
+const sourcePreviewError = ref('')
 const isEdit = ref(false)
 const submitting = ref(false)
 const submittingResult = ref(false)
@@ -602,28 +695,10 @@ const tableRowClassName = ({ rowIndex }) => {
   return rowIndex % 2 === 0 ? 'even-row' : 'odd-row'
 }
 
-const getResultType = (type) => {
-  const types = {
-    win: 'success',
-    lose: 'danger',
-    pending: 'warning'
-  }
-  return types[type] || 'info'
-}
-
-const getResultText = (type) => {
-  const texts = {
-    win: '中标',
-    lose: '未中标',
-    pending: '待定'
-  }
-  return texts[type] || type
-}
-
 const getProbabilityColor = (probability) => {
-  if (probability >= 70) return '#52A33B'
-  if (probability >= 40) return '#D4862C'
-  return '#C94043'
+  if (probability >= 70) return '#16A34A'
+  if (probability >= 40) return '#EA580C'
+  return '#DC2626'
 }
 
 const handleDeleteConfirm = (row) => {
@@ -645,7 +720,7 @@ const fetchStatistics = async () => {
   try {
     if (pageMode.value === 'tenders') {
       const res = await tenderApi.getStatistics()
-      Object.assign(tenderStatistics, res || {})
+      Object.assign(tenderStatistics, res?.data || res || {})
     } else {
       const res = await bidApi.getStatistics()
       Object.assign(statistics, res?.data || {})
@@ -664,8 +739,8 @@ const searchTenders = async (query) => {
   tenderSearchLoading.value = true
   try {
     const res = await tenderApi.getList({ keyword: query, page_size: 20 })
-    const rawList = res?.data?.list || res?.data?.results || []
-    tenderOptions.value = (Array.isArray(rawList) ? rawList : []).map(item => ({
+    const { list } = parseListResponse(res)
+    tenderOptions.value = list.map(item => ({
       id: item.id,
       title: item.title,
       project_code: item.project_code
@@ -841,40 +916,72 @@ const viewDetail = (row) => {
   }
 }
 
-const openSourceUrl = async (url) => {
+const openSourceUrl = async (url, row) => {
   if (!url) return
-  const openedWindow = window.open(url, '_blank', 'noopener,noreferrer')
-  if (openedWindow) {
-    setTimeout(() => {
-      try {
-        const doc = openedWindow.document
-        const isAboutBlank = doc.domain === 'about:blank'
-        const isEmptyPage = doc.readyState === 'complete' && doc.body?.innerHTML === ''
-        const pageContent = doc.body?.innerText || ''
-        const is404Page = pageContent.includes('不存在') || pageContent.includes('404') || pageContent.includes('无法访问')
-        if (isAboutBlank || isEmptyPage || is404Page) {
-          openedWindow.close()
-          ElMessageBox.confirm(
-            '原始链接可能已失效（网页已被删除或移动）。<br/><br/>是否跳转到中国政府采购网首页搜索相关项目？',
-            '链接失效提示',
-            {
-              confirmButtonText: '跳转搜索',
-              cancelButtonText: '关闭',
-              type: 'warning',
-              dangerouslyUseHTMLString: true
-            }
-          ).then(() => {
-            window.open('http://www.ccgp.gov.cn', '_blank', 'noopener,noreferrer')
-          }).catch(() => {})
-        }
-      } catch (e) {}
-    }, 2000)
+  sourcePreviewUrl.value = url
+  sourcePreviewLoading.value = true
+  sourcePreviewContent.value = ''
+  sourcePreviewError.value = ''
+  sourcePreviewVisible.value = true
+
+  try {
+    const res = await tenderApi.getSourceContent(row.id)
+    const data = res.data || res
+    if (data && data.content) {
+      sourcePreviewContent.value = sanitizeContentHtml(data.content)
+    } else {
+      sourcePreviewError.value = '未能获取到公告内容'
+    }
+  } catch (error) {
+    console.error('获取公告内容失败:', error)
+    sourcePreviewError.value = '获取公告内容失败，请尝试在新窗口打开查看'
+  } finally {
+    sourcePreviewLoading.value = false
+  }
+}
+
+const sanitizeContentHtml = (html) => {
+  if (!html) return ''
+  return html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '')
+    .replace(/javascript:/gi, '')
+}
+
+const openInNewWindow = () => {
+  if (sourcePreviewUrl.value) {
+    window.open(sourcePreviewUrl.value, '_blank', 'noopener,noreferrer')
+  }
+}
+
+const closeSourcePreview = () => {
+  sourcePreviewVisible.value = false
+  sourcePreviewUrl.value = ''
+  sourcePreviewLoading.value = false
+  sourcePreviewContent.value = ''
+  sourcePreviewError.value = ''
+}
+
+const fetchSources = async () => {
+  try {
+    const res = await tenderApi.getSources()
+    const data = res.data || res
+    const rawSources = Array.isArray(data) ? data : (data.list || data.results || [])
+    const seen = new Set()
+    sourceOptions.value = rawSources.filter(s => {
+      if (seen.has(s.name)) return false
+      seen.add(s.name)
+      return true
+    })
+  } catch (error) {
+    console.error('获取来源网站列表失败:', error)
+    sourceOptions.value = []
   }
 }
 
 onMounted(() => {
   listPage.fetchData()
   fetchStatistics()
+  fetchSources()
 })
 </script>
 
@@ -985,6 +1092,24 @@ onMounted(() => {
   color: var(--color-text-placeholder);
 }
 
+.source-name-cell {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  &::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--color-primary);
+    flex-shrink: 0;
+  }
+}
+
 .status-tag {
   border-radius: var(--radius-full);
   font-weight: var(--font-weight-medium);
@@ -1036,5 +1161,71 @@ onMounted(() => {
     padding: var(--spacing-base) var(--spacing-xl);
     border-top: 1px solid var(--color-border-lighter);
   }
+}
+
+.source-preview-container {
+  position: relative;
+  width: 100%;
+  min-height: 300px;
+  max-height: 75vh;
+  overflow-y: auto;
+}
+
+.source-preview-content {
+  padding: 20px;
+  line-height: 1.8;
+  color: #1E293B;
+  font-size: 14px;
+  word-wrap: break-word;
+}
+
+.source-preview-content :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 10px 0;
+}
+
+.source-preview-content :deep(td),
+.source-preview-content :deep(th) {
+  border: 1px solid #E2E8F0;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.source-preview-content :deep(img) {
+  max-width: 100%;
+  height: auto;
+}
+
+.source-preview-content :deep(a) {
+  color: #3B82F6;
+  text-decoration: none;
+}
+
+.source-preview-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  gap: var(--spacing-base, 8px);
+  color: var(--color-text-secondary, #64748B);
+  font-size: var(--font-size-md, 14px);
+}
+
+.source-preview-tip {
+  font-size: 12px;
+  color: #CBD5E1;
+}
+
+.source-preview-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  gap: 16px;
+  color: var(--color-text-secondary, #64748B);
+  font-size: var(--font-size-md, 14px);
 }
 </style>

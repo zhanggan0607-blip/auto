@@ -16,4 +16,5 @@ class EnterpriseConfig(AppConfig):
         """
         应用启动时的初始化
         """
-        pass
+        from common.utils.vector_sync_manager import register_vector_signals
+        register_vector_signals()

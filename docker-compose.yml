@@ -1,530 +1,387 @@
-# 投标自动化系统 - Docker Compose配置
-# 架构: Django + FastAPI双层架构, Celery+Redis任务队列, Milvus向量库
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+    tag: "{{.Name}}"
+
+x-django-env: &django-env
+  DJANGO_ENV: production
+  DJANGO_SETTINGS_MODULE: config.settings.production
+  DB_HOST: postgres
+  DB_PORT: 5432
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?请在.env中设置REDIS_PASSWORD}
+  MILVUS_HOST: milvus
+  MILVUS_PORT: 19530
+  MINIO_ENDPOINT: minio:9000
+
+x-celery-django-env: &celery-django-env
+  <<: *django-env
+  CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:?请在.env中设置REDIS_PASSWORD}@redis:6379/3
+  CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:?请在.env中设置REDIS_PASSWORD}@redis:6379/3
 
 services:
-  # ==================== 基础设施服务 ====================
-
-  # PostgreSQL 主库
-  postgres-master:
+  postgres:
+    container_name: bid-postgres
     image: postgres:15-alpine
-    container_name: bid-postgres-master
+    restart: unless-stopped
+    logging: *default-logging
     environment:
-      POSTGRES_DB: ${DB_NAME:-bid_auto}
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-123456}
-      POSTGRES_REPLICA_USER: ${DB_REPLICA_USER:-replica}
-      POSTGRES_REPLICA_PASSWORD: ${DB_REPLICA_PASSWORD:-123456}
+      POSTGRES_DB: ${DB_NAME:-auto}
+      POSTGRES_USER: ${DB_USER:-bid_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?请在.env中设置DB_PASSWORD}
     volumes:
-      - postgres_master_data:/var/lib/postgresql/data
-      - ./docker/postgres/master.conf:/etc/postgresql/postgresql.conf
-      - ./docker/postgres/init-replication.sh:/docker-entrypoint-initdb.d/init-replication.sh
-    ports:
-      - "5432:5432"
+      - postgres_data:/var/lib/postgresql/data
+      - postgres_backup:/backups
+    networks:
+      - backend-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-bid_user} -d ${DB_NAME:-auto}"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - bid-network
+      start_period: 10s
     deploy:
       resources:
         limits:
-          cpus: '4'
-          memory: 8G
+          memory: 512M
         reservations:
-          cpus: '2'
-          memory: 4G
+          memory: 256M
 
-  # PostgreSQL 从库
-  postgres-replica:
-    image: postgres:15-alpine
-    container_name: bid-postgres-replica
+  redis:
+    container_name: bid-redis
+    image: redis:7-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    command: redis-server --maxmemory 200mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:?请在.env中设置REDIS_PASSWORD}
     environment:
-      POSTGRES_DB: ${DB_NAME:-bid_auto}
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-123456}
-      PGUSER: replicator
-      PGPASSWORD: ${DB_REPLICA_PASSWORD:-replica_password}
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?请在.env中设置REDIS_PASSWORD}
     volumes:
-      - postgres_replica_data:/var/lib/postgresql/data
-      - ./docker/postgres/replica.conf:/etc/postgresql/postgresql.conf
-    depends_on:
-      postgres-master:
-        condition: service_healthy
-    ports:
-      - "5433:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - redis_data:/data
     networks:
-      - bid-network
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 4G
-        reservations:
-          cpus: '1'
-          memory: 2G
-
-  # Redis 集群 (6节点) - Celery消息队列
-  redis-1:
-    image: redis:7-alpine
-    container_name: bid-redis-1
-    command: redis-server --cluster-enabled yes --cluster-config-file nodes.conf --cluster-announce-ip redis-1 --port 7000
-    ports:
-      - "7000:7000"
-      - "17000:17000"
-    volumes:
-      - redis_1_data:/data
-    networks:
-      - bid-network
-
-  redis-2:
-    image: redis:7-alpine
-    container_name: bid-redis-2
-    command: redis-server --cluster-enabled yes --cluster-config-file nodes.conf --cluster-announce-ip redis-2 --port 7001
-    ports:
-      - "7001:7001"
-      - "17001:17001"
-    volumes:
-      - redis_2_data:/data
-    networks:
-      - bid-network
-
-  redis-3:
-    image: redis:7-alpine
-    container_name: bid-redis-3
-    command: redis-server --cluster-enabled yes --cluster-config-file nodes.conf --cluster-announce-ip redis-3 --port 7002
-    ports:
-      - "7002:7002"
-      - "17002:17002"
-    volumes:
-      - redis_3_data:/data
-    networks:
-      - bid-network
-
-  redis-4:
-    image: redis:7-alpine
-    container_name: bid-redis-4
-    command: redis-server --cluster-enabled yes --cluster-config-file nodes.conf --cluster-announce-ip redis-4 --port 7003
-    ports:
-      - "7003:7003"
-      - "17003:17003"
-    volumes:
-      - redis_4_data:/data
-    networks:
-      - bid-network
-
-  redis-5:
-    image: redis:7-alpine
-    container_name: bid-redis-5
-    command: redis-server --cluster-enabled yes --cluster-config-file nodes.conf --cluster-announce-ip redis-5 --port 7004
-    ports:
-      - "7004:7004"
-      - "17004:17004"
-    volumes:
-      - redis_5_data:/data
-    networks:
-      - bid-network
-
-  redis-6:
-    image: redis:7-alpine
-    container_name: bid-redis-6
-    command: redis-server --cluster-enabled yes --cluster-config-file nodes.conf --cluster-announce-ip redis-6 --port 7005
-    ports:
-      - "7005:7005"
-      - "17005:17005"
-    volumes:
-      - redis_6_data:/data
-    networks:
-      - bid-network
-
-  # Redis集群初始化
-  redis-cluster-init:
-    image: redis:7-alpine
-    container_name: bid-redis-cluster-init
-    depends_on:
-      - redis-1
-      - redis-2
-      - redis-3
-      - redis-4
-      - redis-5
-      - redis-6
-    command: >
-      sh -c "redis-cli --cluster create 
-      redis-1:7000 redis-2:7001 redis-3:7002 
-      redis-4:7003 redis-5:7004 redis-6:7005 
-      --cluster-replicas 1 --cluster-yes"
-    networks:
-      - bid-network
-
-  # Redis单节点 - 用于Celery Broker (简单模式)
-  redis-celery:
-    image: redis:7-alpine
-    container_name: bid-redis-celery
-    command: redis-server --appendonly yes
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_celery_data:/data
-    networks:
-      - bid-network
+      - backend-net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 5
-
-  # MinIO 对象存储
-  minio:
-    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
-    container_name: bid-minio
-    environment:
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio_data:/minio_data
-    command: minio server /minio_data --console-address ":9001"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
       retries: 3
-    networks:
-      - bid-network
-
-  # ==================== Milvus向量数据库 ====================
-  
-  etcd:
-    image: quay.io/coreos/etcd:v3.5.5
-    container_name: bid-etcd
-    environment:
-      ETCD_AUTO_COMPACTION_MODE: revision
-      ETCD_AUTO_COMPACTION_RETENTION: '1000'
-      ETCD_QUOTA_BACKEND_BYTES: '4294967296'
-      ETCD_SNAPSHOT_COUNT: '50000'
-    volumes:
-      - etcd_data:/etcd
-    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
-    healthcheck:
-      test: ["CMD", "etcdctl", "endpoint", "health"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-    networks:
-      - bid-network
-
-  milvus:
-    image: milvusdb/milvus:v2.3.3
-    container_name: bid-milvus
-    command: ["milvus", "run", "standalone"]
-    security_opt:
-      - seccomp:unconfined
-    environment:
-      ETCD_ENDPOINTS: etcd:2379
-      MINIO_ADDRESS: minio:9000
-    volumes:
-      - milvus_data:/var/lib/milvus
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
-      interval: 30s
-      start_period: 90s
-      timeout: 20s
-      retries: 3
-    ports:
-      - "19530:19530"
-      - "9091:9091"
-    depends_on:
-      - etcd
-      - minio
-    networks:
-      - bid-network
     deploy:
       resources:
         limits:
-          cpus: '4'
-          memory: 16G
+          memory: 400M
+        reservations:
+          memory: 128M
 
-  # ==================== 应用服务 ====================
-
-  # Django API 服务
   backend:
+    container_name: bid-backend
     build:
       context: ./backend
       dockerfile: Dockerfile
-    environment:
-      DJANGO_SETTINGS_MODULE: config.settings.production
-      DB_HOST: postgres-master
-      DB_PORT: 5432
-      DB_NAME: ${DB_NAME:-bid_auto}
-      DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-123456}
-      DB_REPLICA_HOST: postgres-replica
-      DB_REPLICA_PORT: 5432
-      REDIS_HOST: redis-celery
-      REDIS_PORT: 6379
-      REDIS_CRAWLER_DB: 2
-      CELERY_BROKER_URL: redis://redis-celery:6379/0
-      CELERY_RESULT_BACKEND: redis://redis-celery:6379/1
-      MILVUS_HOST: milvus
-      MILVUS_PORT: 19530
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
-      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8080}
-    ports:
-      - "8000:8000"
+      args:
+        VERSION: ${APP_VERSION:-v1.0.0}
+    image: bid-auto-backend:${APP_VERSION:-v1.0.0}
+    restart: unless-stopped
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    env_file:
+      - .env
+    environment: *django-env
+    volumes:
+      - backend_static:/app/staticfiles
+      - backend_media:/app/media
+      - backend_logs:/var/log/bid_auto
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
-      postgres-master:
+      postgres:
         condition: service_healthy
-      postgres-replica:
+      redis:
         condition: service_healthy
-      redis-celery:
-        condition: service_healthy
-      milvus:
-        condition: service_healthy
+    networks:
+      - backend-net
+      - public-net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
       interval: 30s
       timeout: 10s
       retries: 3
-    networks:
-      - bid-network
+      start_period: 30s
     deploy:
-      replicas: 3
       resources:
         limits:
-          cpus: '2'
-          memory: 4G
+          memory: 512M
         reservations:
-          cpus: '1'
-          memory: 2G
+          memory: 256M
 
-  # FastAPI 异步接口服务
   fastapi:
+    container_name: bid-fastapi
     build:
       context: ./backend
       dockerfile: Dockerfile.fastapi
-    environment:
-      DJANGO_SETTINGS_MODULE: config.settings.production
-      REDIS_HOST: redis-celery
-      REDIS_PORT: 6379
-      REDIS_DB: 1
-      CELERY_BROKER_URL: redis://redis-celery:6379/0
-      CELERY_RESULT_BACKEND: redis://redis-celery:6379/1
-      MILVUS_HOST: milvus
-      MILVUS_PORT: 19530
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
-    ports:
-      - "8001:8001"
+      args:
+        VERSION: ${APP_VERSION:-v1.0.0}
+    image: bid-auto-fastapi:${APP_VERSION:-v1.0.0}
+    restart: unless-stopped
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    env_file:
+      - .env
+    environment: *django-env
+    volumes:
+      - backend_media:/app/media
+      - backend_logs:/var/log/bid_auto
     depends_on:
-      redis-celery:
+      postgres:
         condition: service_healthy
-      milvus:
+      redis:
         condition: service_healthy
+    networks:
+      - backend-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health/"]
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-    networks:
-      - bid-network
+      start_period: 15s
     deploy:
-      replicas: 2
       resources:
         limits:
-          cpus: '2'
-          memory: 2G
+          memory: 384M
         reservations:
-          cpus: '1'
-          memory: 1G
+          memory: 128M
 
-  # Celery Worker (通用任务)
   celery-worker:
+    container_name: bid-celery-worker
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: celery -A config worker -l info -Q default,workflow,notification --concurrency=4
-    environment:
-      DJANGO_SETTINGS_MODULE: config.settings.production
-      DB_HOST: postgres-master
-      DB_PORT: 5432
-      DB_NAME: ${DB_NAME:-bid_auto}
-      DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-123456}
-      REDIS_HOST: redis-celery
-      REDIS_PORT: 6379
-      CELERY_BROKER_URL: redis://redis-celery:6379/0
-      CELERY_RESULT_BACKEND: redis://redis-celery:6379/1
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+      args:
+        VERSION: ${APP_VERSION:-v1.0.0}
+    image: bid-auto-backend:${APP_VERSION:-v1.0.0}
+    restart: unless-stopped
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    env_file:
+      - .env
+    environment: *celery-django-env
+    command: ["celery", "-A", "config.celery", "worker", "--loglevel=info", "--concurrency=2", "-Q", "default,notification,workflow,crawler,vector"]
+    volumes:
+      - backend_static:/app/staticfiles
+      - backend_media:/app/media
+      - backend_logs:/var/log/bid_auto
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
-      - backend
-      - redis-celery
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
-      - bid-network
+      - backend-net
     deploy:
-      replicas: 3
       resources:
         limits:
-          cpus: '2'
-          memory: 4G
+          memory: 512M
+        reservations:
+          memory: 256M
 
-  # Celery Worker (爬虫任务)
-  celery-crawler:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    command: celery -A config worker -l info -Q crawler,vector --concurrency=2
-    environment:
-      DJANGO_SETTINGS_MODULE: config.settings.production
-      DB_HOST: postgres-master
-      DB_PORT: 5432
-      DB_NAME: ${DB_NAME:-bid_auto}
-      DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-123456}
-      REDIS_HOST: redis-celery
-      REDIS_PORT: 6379
-      CELERY_BROKER_URL: redis://redis-celery:6379/0
-      CELERY_RESULT_BACKEND: redis://redis-celery:6379/1
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
-    depends_on:
-      - backend
-      - redis-celery
-    networks:
-      - bid-network
-    deploy:
-      replicas: 2
-      resources:
-        limits:
-          cpus: '2'
-          memory: 4G
-
-  # Celery Beat (定时任务)
   celery-beat:
+    container_name: bid-celery-beat
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
-    environment:
-      DJANGO_SETTINGS_MODULE: config.settings.production
-      DB_HOST: postgres-master
-      DB_PORT: 5432
-      DB_NAME: ${DB_NAME:-bid_auto}
-      DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-123456}
-      REDIS_HOST: redis-celery
-      REDIS_PORT: 6379
-      CELERY_BROKER_URL: redis://redis-celery:6379/0
-      CELERY_RESULT_BACKEND: redis://redis-celery:6379/1
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+      args:
+        VERSION: ${APP_VERSION:-v1.0.0}
+    image: bid-auto-backend:${APP_VERSION:-v1.0.0}
+    restart: unless-stopped
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    env_file:
+      - .env
+    environment: *celery-django-env
+    command: ["celery", "-A", "config.celery", "beat", "--loglevel=info"]
+    volumes:
+      - backend_logs:/var/log/bid_auto
     depends_on:
-      - backend
-      - redis-celery
+      redis:
+        condition: service_healthy
     networks:
-      - bid-network
+      - backend-net
     deploy:
-      replicas: 1
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
 
-  # 前端服务
   frontend:
+    container_name: bid-frontend
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VERSION: ${APP_VERSION:-v1.0.0}
+    image: bid-auto-frontend:${APP_VERSION:-v1.0.0}
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - public-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+        reservations:
+          memory: 32M
+
+  gateway:
+    container_name: bid-gateway
+    image: nginx:alpine
+    restart: unless-stopped
+    logging: *default-logging
+    volumes:
+      - ./docker/nginx/gateway.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./docker/nginx/certbot-webroot:/var/www/certbot:ro
+      - ./docker/nginx/server.crt:/etc/nginx/ssl/server.crt:ro
+      - ./docker/nginx/server.key:/etc/nginx/ssl/server.key:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "80:80"
-    depends_on:
-      - backend
-    networks:
-      - bid-network
-    deploy:
-      replicas: 2
-      resources:
-        limits:
-          cpus: '1'
-          memory: 1G
-
-  # ==================== 监控服务 ====================
-
-  # Prometheus
-  prometheus:
-    image: prom/prometheus:v2.47.0
-    container_name: bid-prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.enable-lifecycle'
-    networks:
-      - bid-network
-
-  # Grafana
-  grafana:
-    image: grafana/grafana:10.1.0
-    container_name: bid-grafana
-    ports:
-      - "3000:3000"
-    environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
-      GF_INSTALL_PLUGINS: redis-datasource
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./docker/grafana/provisioning:/etc/grafana/provisioning
-    depends_on:
-      - prometheus
-    networks:
-      - bid-network
-
-  # Nginx 网关
-  nginx:
-    image: nginx:alpine
-    container_name: bid-nginx
-    ports:
       - "443:443"
-    volumes:
-      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./docker/nginx/ssl:/etc/nginx/ssl
     depends_on:
-      - backend
-      - fastapi
-      - frontend
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
     networks:
-      - bid-network
+      - backend-net
+      - public-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 2G
+          memory: 64M
+        reservations:
+          memory: 32M
 
-networks:
-  bid-network:
-    driver: bridge
+  etcd:
+    container_name: bid-milvus-etcd
+    image: quay.io/coreos/etcd:v3.5.17
+    restart: unless-stopped
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    profiles:
+      - milvus
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    networks:
+      - backend-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  minio:
+    container_name: bid-minio
+    image: minio/minio:RELEASE.2024-01-31T20-20-33Z
+    restart: unless-stopped
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    profiles:
+      - milvus
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?请在.env中设置MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?请在.env中设置MINIO_SECRET_KEY}
+    volumes:
+      - minio_data:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    networks:
+      - backend-net
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  milvus:
+    container_name: bid-milvus
+    image: milvusdb/milvus:v2.4.17
+    restart: unless-stopped
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    profiles:
+      - milvus
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    command: ["milvus", "run", "standalone"]
+    volumes:
+      - milvus_data:/var/lib/milvus
+    depends_on:
+      etcd:
+        condition: service_started
+      minio:
+        condition: service_started
+    networks:
+      - backend-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
 
 volumes:
-  postgres_master_data:
-  postgres_replica_data:
-  redis_1_data:
-  redis_2_data:
-  redis_3_data:
-  redis_4_data:
-  redis_5_data:
-  redis_6_data:
-  redis_celery_data:
+  postgres_data:
+  postgres_backup:
+  redis_data:
   etcd_data:
   minio_data:
   milvus_data:
-  prometheus_data:
-  grafana_data:
+  backend_static:
+  backend_media:
+  backend_logs:
+
+networks:
+  backend-net:
+    driver: bridge
+  public-net:
+    driver: bridge

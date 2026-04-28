@@ -1,0 +1,74 @@
+#!/bin/sh
+# Pre-commit hook for bid-auto project
+# This hook ensures TypeScript types are in sync with Django serializers
+
+echo "=========================================="
+echo "Running pre-commit checks..."
+echo "=========================================="
+
+# Get the project root directory
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+
+# ===========================================
+# Step 1: Generate TypeScript types from Django serializers (Backend)
+# ===========================================
+echo ""
+echo "Step 1: Generating TypeScript types from Django serializers..."
+
+cd "$PROJECT_ROOT/backend" || exit 1
+
+python -m scripts.generate_ts_types --apps tenders,enterprise,crawler,vectorlib,openclaw --output frontend/src/types/generated
+
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "❌ Failed to generate TypeScript types!"
+    exit 1
+fi
+
+echo "✅ TypeScript types generated successfully!"
+
+# ===========================================
+# Step 2: Run Frontend TypeScript type check
+# ===========================================
+echo ""
+echo "Step 2: Running Frontend TypeScript type check..."
+
+cd "$PROJECT_ROOT/frontend" || exit 1
+
+npx vue-tsc --noEmit --pretty
+
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "❌ Type check failed! Please fix type errors before committing."
+    echo ""
+    echo "Note: If you just added new Serializer fields, the types have been"
+    echo "auto-generated above. You may need to update your component code."
+    exit 1
+fi
+
+echo "✅ Frontend TypeScript type check passed!"
+
+# ===========================================
+# Step 3: Run ESLint check
+# ===========================================
+echo ""
+echo "Step 3: Running ESLint..."
+
+cd "$PROJECT_ROOT/frontend" || exit 1
+
+npx vue-cli-service lint --no-fix
+
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "⚠️  ESLint found issues. Please fix them or use 'git commit --no-verify' to bypass."
+    exit 1
+fi
+
+echo "✅ ESLint check passed!"
+
+echo ""
+echo "=========================================="
+echo "✅ All pre-commit checks passed!"
+echo "=========================================="
+
+exit 0

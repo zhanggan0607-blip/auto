@@ -7,6 +7,8 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, date
 from difflib import SequenceMatcher
 
+from django.db import models
+
 from .models import (
     Enterprise, EnterpriseQualification, EnterprisePerformance,
     EnterpriseMatchRule, EnterpriseMatchResult

@@ -91,7 +91,7 @@ class ErrorDiagnoser:
     ERROR_PATTERNS: List[Tuple[str, str, ErrorType, str]] = [
         # 网络错误模式
         (r"ECONNREFUSED", "后端服务拒绝连接", ErrorType.NETWORK_ERROR,
-         "后端Django服务器未启动或端口被占用，请执行: cd backend && python manage.py runserver 8000"),
+         "后端Django服务器未启动或端口被占用，请执行: cd backend && python manage.py runserver 8100"),
         (r"Connection refused", "连接被拒绝", ErrorType.NETWORK_ERROR,
          "目标服务未启动，请检查服务状态"),
         (r"timeout|timed out", "网络请求超时", ErrorType.TIMEOUT_ERROR,

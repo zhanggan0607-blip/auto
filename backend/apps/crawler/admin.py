@@ -6,6 +6,7 @@ from .models import (
     WebsiteTemplate, CrawlSession, CrawlResult, CrawlLog,
     FailureKnowledge, EnterpriseVectorIndex, BidProjectTracking
 )
+from .assurance_models import CrawlHealthCheck, CrawlOptimizationPlan, CrawlAssuranceReport
 
 
 @admin.register(WebsiteTemplate)
@@ -203,3 +204,29 @@ class BidProjectTrackingAdmin(admin.ModelAdmin):
             'fields': ('remarks', 'extra_data', 'created_by', 'created_at', 'updated_at')
         }),
     )
+
+
+@admin.register(CrawlHealthCheck)
+class CrawlHealthCheckAdmin(admin.ModelAdmin):
+    list_display = ['target_url', 'network_connectivity', 'http_status', 'page_structure', 'anti_crawl', 'extraction_rules', 'overall_status', 'checked_at']
+    list_filter = ['overall_status', 'network_connectivity', 'anti_crawl']
+    search_fields = ['target_url']
+    ordering = ['-checked_at']
+    readonly_fields = ['checked_at']
+
+
+@admin.register(CrawlOptimizationPlan)
+class CrawlOptimizationPlanAdmin(admin.ModelAdmin):
+    list_display = ['health_check', 'optimization_type', 'is_applied', 'apply_result', 'created_at']
+    list_filter = ['optimization_type', 'is_applied', 'apply_result']
+    ordering = ['-created_at']
+    readonly_fields = ['created_at', 'applied_at']
+
+
+@admin.register(CrawlAssuranceReport)
+class CrawlAssuranceReportAdmin(admin.ModelAdmin):
+    list_display = ['target_url', 'status', 'attempt_count', 'max_attempts', 'data_collected', 'notification_sent', 'started_at']
+    list_filter = ['status', 'notification_sent']
+    search_fields = ['target_url', 'trigger_reason', 'final_result']
+    ordering = ['-created_at']
+    readonly_fields = ['created_at', 'updated_at', 'started_at', 'finished_at']

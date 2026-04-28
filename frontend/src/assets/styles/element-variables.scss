@@ -1,113 +1,103 @@
-/**
- * Element Plus 主题变量覆盖
- * 斗栱云风格 - 蓝绿配色主题
- */
-
-/* 主题色 */
 $--colors-primary: (
   "primary": (
-    "base": #0066CC,
-    "light-2": #3399FF,
-    "light-1": #1A80E6,
-    "dark-1": #0052A3,
-    "dark-2": #004C99,
+    "base": #1A56DB,
+    "light-3": #3B82F6,
+    "light-5": #60A5FA,
+    "light-7": #93C5FD,
+    "light-8": #BFDBFE,
+    "light-9": #EFF6FF,
+    "dark-2": #1E40AF,
   ),
   "success": (
-    "base": #00A86B,
-    "light-2": #00C87A,
-    "light-1": #00B377,
-    "dark-1": #007A4D,
-    "dark-2": #006B42,
+    "base": #16A34A,
+    "light-3": #22C55E,
+    "light-5": #4ADE80,
+    "light-7": #86EFAC,
+    "light-8": #BBF7D0,
+    "light-9": #DCFCE7,
+    "dark-2": #15803D,
   ),
   "warning": (
-    "base": #FF9500,
-    "light-2": #FFAD33,
-    "light-1": #FFA31A,
-    "dark-1": #CC7700,
-    "dark-2": #B36A00,
+    "base": #EA580C,
+    "light-3": #F97316,
+    "light-5": #FB923C,
+    "light-7": #FDBA74,
+    "light-8": #FED7AA,
+    "light-9": #FFF7ED,
+    "dark-2": #C2410C,
   ),
   "danger": (
-    "base": #E53935,
-    "light-2": #FF6F61,
-    "light-1": #F24739,
-    "dark-1": #C62828,
-    "dark-2": #B71C1C,
+    "base": #DC2626,
+    "light-3": #DC2626,
+    "light-5": #F87171,
+    "light-7": #FCA5A5,
+    "light-8": #FECACA,
+    "light-9": #FEE2E2,
+    "dark-2": #B91C1C,
   ),
   "info": (
-    "base": #607D8B,
-    "light-2": #78909C,
-    "light-1": #6B8A9B,
-    "dark-1": #455A64,
-    "dark-2": #37474F,
+    "base": #2563EB,
+    "light-3": #3B82F6,
+    "light-5": #60A5FA,
+    "light-7": #93C5FD,
+    "light-8": #BFDBFE,
+    "light-9": #DBEAFE,
+    "dark-2": #1D4ED8,
   ),
 );
 
-/* 圆角 */
-$--border-radius-base: 6px;
-$--border-radius-small: 4px;
+$--border-radius-base: 8px;
+$--border-radius-small: 6px;
 $--border-radius-round: 20px;
 
-/* 字体 */
 $--font-size-base: 14px;
 $--font-size-primary: 14px;
 
-/* 阴影 */
-$--box-shadow-base: 0 2px 6px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
-$--box-shadow-light: 0 4px 12px rgba(0, 0, 0, 0.08);
-$--box-shadow-lighter: 0 8px 24px rgba(0, 0, 0, 0.10);
+$--box-shadow-base: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+$--box-shadow-light: 0 4px 8px rgba(0, 0, 0, 0.08);
+$--box-shadow-lighter: 0 8px 16px rgba(0, 0, 0, 0.1);
 
-/* 过渡 */
 $--transition-duration: 0.2s;
 
-/* 输入框 */
-$--input-border-radius-base: 6px;
-$--input-border-color: #E0E0E0;
-$--input-border-color-hover: #0066CC;
-$--input-focus-border-color: #0066CC;
+$--input-border-radius-base: 8px;
+$--input-border-color: #E2E8F0;
+$--input-border-color-hover: #1A56DB;
+$--input-focus-border-color: #1A56DB;
 $--input-fill-background: #FFFFFF;
 $--input-fill-focus-background: #FFFFFF;
 
-/* 按钮 */
-$--button-border-radius-base: 6px;
+$--button-border-radius-base: 8px;
 $--button-padding-vertical: 10px;
 $--button-padding-horizontal: 20px;
-$--button-medium-border-radius: 6px;
-$--button-small-border-radius: 4px;
+$--button-medium-border-radius: 8px;
+$--button-small-border-radius: 6px;
 
-/* 卡片 */
-$--card-border-radius-base: 8px;
-$--card-border-color: #F0F0F0;
+$--card-border-radius-base: 12px;
+$--card-border-color: #E2E8F0;
 
-/* 对话框 */
-$--dialog-border-radius-base: 12px;
+$--dialog-border-radius-base: 16px;
 $--dialog-padding-primary: 24px;
 
-/* 菜单 */
 $--menu-item-border-radius-base: 8px;
-$--menu-item-hover-fill-color: rgba(0, 102, 204, 0.04);
-$--menu-item-hover-text-color: #0066CC;
-$--menu-active-color: #0066CC;
+$--menu-item-hover-fill-color: rgba(26, 86, 219, 0.04);
+$--menu-item-hover-text-color: #1A56DB;
+$--menu-active-color: #1A56DB;
 $--menu-item-font-size: 14px;
 
-/* 表格 */
-$--table-border-color: #F0F0F0;
-$--table-header-background: #F7F8FA;
-$--table-row-hover-background: rgba(0, 102, 204, 0.02);
-$--table-current-row-background: rgba(0, 102, 204, 0.04);
+$--table-border-color: #F1F5F9;
+$--table-header-background: #F8FAFC;
+$--table-row-hover-background: #F1F5F9;
+$--table-current-row-background: rgba(26, 86, 219, 0.04);
 
-/* 标签 */
-$--tag-border-radius: 4px;
+$--tag-border-radius: 6px;
 $--tag-padding-vertical: 0;
 $--tag-padding-horizontal: 10px;
 
-/* 下拉菜单 */
 $--dropdown-menu-box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-$--dropdown-menuItem-hover-fill: rgba(0, 102, 204, 0.04);
-$--dropdown-menuItem-hover-color: #0066CC;
+$--dropdown-menuItem-hover-fill: rgba(26, 86, 219, 0.04);
+$--dropdown-menuItem-hover-color: #1A56DB;
 
-/* 分页 */
 $--pagination-button-bg: #FFFFFF;
-$--pagination-hover-color: #0066CC;
+$--pagination-hover-color: #1A56DB;
 
-/* 导入 Element Plus 变量 */
 @use "element-plus/theme-chalk/src/index.scss" as *;

@@ -285,46 +285,6 @@ def get_tenant_model():
     """获取Tenant模型"""
     return Tenant
 
-
-class TenantMiddleware:
-    """
-    租户中间件
-
-    从请求中解析租户并设置到上下文
-    """
-
-    def __init__(self, get_response: Callable):
-        self.get_response = get_response
-
-    def __call__(self, request: HttpRequest):
-        tenant = self.resolve_tenant(request)
-
-        if tenant:
-            with TenantContextManager(tenant):
-                response = self.get_response(request)
-        else:
-            response = self.get_response(request)
-
-        return response
-
-    def resolve_tenant(self, request: HttpRequest) -> Optional[Tenant]:
-        """解析租户"""
-        if not request.user.is_authenticated:
-            return None
-
-        try:
-            membership = TenantUser.objects.select_related('tenant').get(
-                user=request.user,
-                is_active=True
-            )
-            if membership.tenant.is_active and not membership.tenant.is_expired:
-                return membership.tenant
-        except TenantUser.DoesNotExist:
-            pass
-
-        return None
-
-
 def tenant_required(view_func: Callable) -> Callable:
     """
     租户必需装饰器

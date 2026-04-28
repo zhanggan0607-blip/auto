@@ -7,6 +7,7 @@
 - 根据诊断结果执行降级策略
 - 记录失败案例到知识库学习
 """
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 class TaskType(Enum):
     """
-    任务类型枚举 - 9个专职任务
+    任务类型枚举 - 10个专职任务
     """
     TASK_1_QUALIFICATION_MATCH = 'task_1_qualification_match'
     TASK_2_DOWNLOAD_TENDER = 'task_2_download_tender'
@@ -32,6 +33,7 @@ class TaskType(Enum):
     TASK_7_OPTIMIZE_BID = 'task_7_optimize_bid'
     TASK_8_TRACK_PROJECT = 'task_8_track_project'
     TASK_9_NOTIFY_RESULT = 'task_9_notify_result'
+    TASK_10_VECTORIZE = 'task_10_vectorize'
 
 
 class TaskStatus(Enum):
@@ -151,6 +153,7 @@ class BidAutomationWorkflow:
             TaskType.TASK_7_OPTIMIZE_BID: self._task_7_optimize_bid,
             TaskType.TASK_8_TRACK_PROJECT: self._task_8_track_project,
             TaskType.TASK_9_NOTIFY_RESULT: self._task_9_notify_result,
+            TaskType.TASK_10_VECTORIZE: self._task_10_vectorize_to_library,
         }
     
     async def start_workflow(
@@ -197,7 +200,6 @@ class BidAutomationWorkflow:
         try:
             await self._create_workflow_record(workflow_state)
             
-            import asyncio
             asyncio.create_task(self._run_workflow(workflow_id))
             
             return {
@@ -249,7 +251,7 @@ class BidAutomationWorkflow:
         
         workflow['status'] = TaskStatus.RUNNING.value
         workflow['started_at'] = timezone.now()
-        
+
         task_sequence = [
             TaskType.TASK_1_QUALIFICATION_MATCH,
             TaskType.TASK_2_DOWNLOAD_TENDER,
@@ -518,14 +520,15 @@ class BidAutomationWorkflow:
         """
         任务2: 文件下载Agent
         自动下载招标文件及相关附件
+        支持多网站适配器模式
         """
         from apps.tenders.models import TenderProject, TenderFile
-        from crawler.shanghai_gov_crawler_v2 import ShanghaiGovCrawler
-        
+        from common.crawler.adapters import download_adapter_manager
+
         try:
             tender = TenderProject.objects.get(pk=ctx.tender_id)
             source_url = ctx.tender_data.get('source_url') or tender.source_url
-            
+
             if not source_url:
                 return TaskResult(
                     task_type=TaskType.TASK_2_DOWNLOAD_TENDER,
@@ -534,9 +537,8 @@ class BidAutomationWorkflow:
                     message='无下载链接，跳过下载步骤',
                     data={'files': []}
                 )
-            
-            crawler = ShanghaiGovCrawler()
-            download_result = await crawler.download_tender_files(
+
+            download_result = await download_adapter_manager.download_tender_files(
                 url=source_url,
                 tender_id=ctx.tender_id
             )
@@ -642,20 +644,55 @@ class BidAutomationWorkflow:
         """
         任务4: 标书生成Agent
         基于解析结果和企业数据，自动生成标书文档
+        增加：从向量库检索历史高分标书作为参考
         """
-        from openclaw.skills.generator.bid_document_generator import BidDocumentGeneratorSkill
+        from openclaw.skills.generator.bid_generator import BidDocumentGeneratorSkill
         from apps.documents.models import GeneratedDocument
-        
+        from services.vector import document_vector_store
+
         try:
             generator = BidDocumentGeneratorSkill()
-            
+
+            reference_documents = []
+            reference_content = ''
+
+            try:
+                from services.vector import chroma_client
+                if chroma_client.is_available:
+                    search_query = f"{ctx.parsed_content.get('title', '')} {ctx.tender_data.get('requirements', {}).get('project_type', '')}"
+                    search_results = document_vector_store.search_similar(
+                        query_text=search_query,
+                        n_results=3,
+                        min_similarity=0.6
+                    )
+
+                    if search_results:
+                        logger.info(f"找到 {len(search_results)} 篇历史标书作为参考")
+
+                        from apps.vectorlib.models import BidDocumentLibrary
+                        doc_ids = [r['id'] for r in search_results]
+                        docs = BidDocumentLibrary.objects.filter(id__in=doc_ids, quality_score__gte=90)
+
+                        for doc in docs:
+                            if doc.content_text:
+                                reference_content += f"\n\n=== 参考文档: {doc.title} (分数:{doc.quality_score}) ===\n{doc.content_text[:2000]}"
+
+                        reference_documents = [
+                            {'id': r['id'], 'similarity': r['similarity']}
+                            for r in search_results
+                        ]
+            except Exception as e:
+                logger.warning(f"检索历史标书失败，继续生成: {str(e)}")
+
             generate_result = await generator.execute({
                 'tender_id': ctx.tender_id,
                 'enterprise_id': ctx.enterprise_id,
                 'tender_data': ctx.tender_data,
                 'enterprise_data': ctx.enterprise_data,
                 'parsed_content': ctx.parsed_content,
-                'scoring_criteria': ctx.scoring_criteria
+                'scoring_criteria': ctx.scoring_criteria,
+                'reference_documents': reference_documents,
+                'reference_content': reference_content
             })
             
             if generate_result.get('success'):
@@ -987,7 +1024,126 @@ class BidAutomationWorkflow:
                 message=f'通知失败但工作流已完成: {str(e)}',
                 data={'error': str(e)}
             )
-    
+
+    async def _task_10_vectorize_to_library(self, ctx: TaskContext) -> TaskResult:
+        """
+        任务10: 标书向量库入库
+        将90分以上的已生成标书存入向量库，供后续投标参考
+        """
+        from apps.vectorlib.models import BidDocumentLibrary
+        from services.vector import document_vector_store, chroma_client
+
+        try:
+            if ctx.bid_score < self.REVIEW_PASS_THRESHOLD:
+                return TaskResult(
+                    task_type=TaskType.TASK_10_VECTORIZE,
+                    status=TaskStatus.SKIPPED,
+                    success=True,
+                    message=f'得分{ctx.bid_score}分，未达到{self.REVIEW_PASS_THRESHOLD}分入库阈值',
+                    data={'score': ctx.bid_score, 'threshold': self.REVIEW_PASS_THRESHOLD}
+                )
+
+            generated_doc = ctx.generated_document
+            if not generated_doc:
+                return TaskResult(
+                    task_type=TaskType.TASK_10_VECTORIZE,
+                    status=TaskStatus.SKIPPED,
+                    success=True,
+                    message='无生成文档，跳过入库',
+                    data={}
+                )
+
+            doc_title = generated_doc.get('title', f'标书-{ctx.tender_data.get("title", "")}')
+            doc_content = generated_doc.get('content', '')
+            tender_title = ctx.tender_data.get('title', '')
+
+            existing = BidDocumentLibrary.objects.filter(
+                title=doc_title,
+                source_type='workflow'
+            ).first()
+
+            if existing:
+                logger.info(f"文档已存在，跳过入库: {doc_title}")
+                return TaskResult(
+                    task_type=TaskType.TASK_10_VECTORIZE,
+                    status=TaskStatus.COMPLETED,
+                    success=True,
+                    message='文档已存在，跳过入库',
+                    data={'document_id': existing.id, 'vector_id': existing.vector_id}
+                )
+
+            doc = BidDocumentLibrary.objects.create(
+                title=doc_title,
+                document_type='bid_document',
+                source_type='workflow',
+                content_text=doc_content[:10000],
+                content_summary=doc_content[:500] if doc_content else '',
+                project_type=ctx.tender_data.get('requirements', {}).get('project_type', ''),
+                industry=ctx.tender_data.get('industry', ''),
+                region=ctx.tender_data.get('region', ''),
+                quality_score=int(ctx.bid_score),
+                source_url=ctx.tender_data.get('source_url', ''),
+                metadata={
+                    'workflow_id': ctx.workflow_id,
+                    'tender_id': ctx.tender_id,
+                    'enterprise_id': ctx.enterprise_id,
+                    'bid_score': ctx.bid_score,
+                    'reference_documents': ctx.generated_document.get('reference_documents', [])
+                },
+                tags=['AI生成', '投标文档', f'得分{int(ctx.bid_score)}分']
+            )
+
+            if chroma_client.is_available:
+                metadata = {
+                    'document_type': 'bid_document',
+                    'source_type': 'workflow',
+                    'industry': ctx.tender_data.get('industry', ''),
+                    'project_type': ctx.tender_data.get('requirements', {}).get('project_type', ''),
+                    'quality_score': int(ctx.bid_score)
+                }
+
+                success = document_vector_store.add_document(
+                    doc_id=doc.id,
+                    title=doc_title,
+                    content=doc_content[:8000],
+                    metadata=metadata
+                )
+
+                if success:
+                    doc.vector_status = 'indexed'
+                    doc.vector_id = f'doc_{doc.id}'
+                    logger.info(f"标书向量入库成功: {doc.id}")
+                else:
+                    doc.vector_status = 'failed'
+                    logger.warning(f"标书向量入库失败: {doc.id}")
+            else:
+                doc.vector_status = 'pending'
+                logger.warning("向量库不可用，标记为pending")
+
+            doc.save(update_fields=['vector_status', 'vector_id'])
+
+            return TaskResult(
+                task_type=TaskType.TASK_10_VECTORIZE,
+                status=TaskStatus.COMPLETED,
+                success=True,
+                message=f'标书已存入向量库，质量评分:{ctx.bid_score}分',
+                data={
+                    'document_id': doc.id,
+                    'vector_id': doc.vector_id,
+                    'quality_score': ctx.bid_score
+                }
+            )
+
+        except Exception as e:
+            logger.error(f"标书入库失败: {str(e)}")
+            return TaskResult(
+                task_type=TaskType.TASK_10_VECTORIZE,
+                status=TaskStatus.COMPLETED,
+                success=True,
+                message=f'入库失败但工作流继续: {str(e)}',
+                data={'error': str(e)}
+            )
+
     def _merge_parsed_results(self, results: List[Dict]) -> Dict:
         """
         合并多个解析结果
@@ -1083,10 +1239,8 @@ class BidAutomationWorkflow:
             workflow['status'] = TaskStatus.RUNNING.value
             
             if workflow['context'].bid_score < self.REVIEW_PASS_THRESHOLD:
-                import asyncio
                 asyncio.create_task(self._continue_from_optimize(workflow))
             else:
-                import asyncio
                 asyncio.create_task(self._continue_from_upload(workflow))
             
             return {'status': 'resumed', 'message': '工作流已恢复'}

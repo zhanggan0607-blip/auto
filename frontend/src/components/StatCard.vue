@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <el-card
     class="stat-card"
     :class="[`stat-card-${type}`, { 'stat-card-clickable': clickable }]"
@@ -134,7 +134,7 @@ const handleClick = () => {
     right: 0;
     width: 80px;
     height: 80px;
-    background: radial-gradient(circle at top right, rgba(0, 102, 204, 0.04), transparent);
+    background: radial-gradient(circle at top right, rgba(26, 86, 219, 0.04), transparent);
     border-radius: 50%;
     transform: translate(30%, -30%);
     pointer-events: none;
@@ -170,7 +170,7 @@ const handleClick = () => {
   justify-content: center;
   flex-shrink: 0;
   transition: transform 0.25s ease;
-  box-shadow: 0 4px 12px rgba(0, 102, 204, 0.2);
+  box-shadow: 0 4px 12px rgba(26, 86, 219, 0.2);
 
   .el-icon {
     font-size: 24px;

@@ -6,14 +6,14 @@ import logging
 from typing import Optional
 from rest_framework import viewsets, status
 from rest_framework.decorators import action, throttle_classes
-from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.throttling import UserRateThrottle
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Count
-from django.db import models
+from django.db import models, transaction
 
-from core.viewsets import AuthenticatedModelViewSet, AuthenticatedReadOnlyViewSet, APIResponseMixin
+from utils.responses import UnifiedResponse
+from common.views.base import BaseViewSet, AuthenticatedModelViewSet, AuthenticatedReadOnlyViewSet
 
 
 class EnterpriseCollectThrottle(UserRateThrottle):
@@ -52,13 +52,13 @@ from .serializers import (
 )
 from .services import EnterpriseMatcher, EnterpriseService
 from utils.helpers import get_client_ip
-from utils.responses import UnifiedResponse
 from services.vector import embedding_service, enterprise_vector_store
+from services.vector.transaction import VectorTransaction
 
 logger = logging.getLogger(__name__)
 
 
-class EnterpriseViewSet(AuthenticatedModelViewSet):
+class EnterpriseViewSet(BaseViewSet):
     """
     企业视图集
     """
@@ -75,6 +75,16 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
     search_fields = ['name', 'credit_code']
     ordering_fields = ['created_at', 'name']
     ordering = ['-created_at']
+
+    def get_queryset(self):
+        return Enterprise.objects.all().select_related(
+            'bid_config'
+        ).prefetch_related(
+            'qualifications',
+            'performances',
+            'contacts',
+            'key_personnel'
+        )
     
     def get_serializer_class(self):
         """
@@ -99,7 +109,7 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
         stats = EnterpriseService.get_enterprise_statistics(enterprise)
         
         serializer = EnterpriseStatisticsSerializer(stats)
-        return Response(serializer.data)
+        return UnifiedResponse.success(data=serializer.data)
     
     @action(detail=True, methods=['get'])
     def expiring_qualifications(self, request, pk=None):
@@ -117,27 +127,24 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
         qualifications = EnterpriseService.check_qualification_expiry(enterprise, days)
         serializer = EnterpriseQualificationSerializer(qualifications, many=True)
         
-        return Response(serializer.data)
+        return UnifiedResponse.success(data=serializer.data)
     
     @action(detail=False, methods=['get'])
     def my_enterprise(self, request):
-        """
-        获取当前用户关联的企业
-        """
+        from services.data import EnterpriseRepository
+        repo = EnterpriseRepository()
         try:
             enterprise = Enterprise.objects.get(
                 Q(created_by=request.user) | Q(name=request.user.company_name)
             )
             serializer = self.get_serializer(enterprise)
-            return Response(serializer.data)
+            return UnifiedResponse.success(data=serializer.data)
         except Enterprise.DoesNotExist:
-            return Response({'message': '未找到关联企业'}, status=status.HTTP_404_NOT_FOUND)
+            return UnifiedResponse.not_found('未找到关联企业')
         except Enterprise.MultipleObjectsReturned:
-            enterprises = Enterprise.objects.filter(
-                Q(created_by=request.user) | Q(name=request.user.company_name)
-            )
+            enterprises = repo.get_user_enterprises(request.user.id)
             serializer = EnterpriseListSerializer(enterprises, many=True)
-            return Response(serializer.data)
+            return UnifiedResponse.success(data=serializer.data)
     
     @action(detail=False, methods=['post'])
     @throttle_classes([EnterpriseCollectThrottle])
@@ -163,13 +170,12 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
         
         if not company_name:
             logger.warning(f"Company name is empty or None: {company_name}")
-            return Response(
-                {'success': False, 'message': '企业名称不能为空'},
-                status=status.HTTP_400_BAD_REQUEST
+            return UnifiedResponse.error(
+                message='企业名称不能为空',
+                status_code=status.HTTP_400_BAD_REQUEST
             )
         
         try:
-            import asyncio
             from openclaw.agents.enterprise_collector_agent import EnterpriseInfoCollectorAgent
             
             async def collect():
@@ -188,11 +194,10 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
             loop.close()
             
             if result.success:
-                return Response({
-                    'success': True,
-                    'message': '企业信息采集成功',
-                    'data': result.data
-                })
+                return UnifiedResponse.success(
+                    data=result.data,
+                    message='企业信息采集成功'
+                )
             else:
                 error_msg = result.error or '采集失败'
                 sources_tried = result.metadata.get('sources_tried', []) if result.metadata else []
@@ -201,23 +206,24 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
                     error_msg = f'未能从公开渠道获取"{company_name}"的企业信息。可能原因：\n1. 企业名称不正确或不完整\n2. 该企业信息尚未公开\n3. 网络访问受限\n\n建议：请手动录入企业信息'
                 
                 response_data = {
-                    'success': False,
-                    'message': error_msg,
                     'company_name': company_name
                 }
                 if sources_tried:
                     response_data['sources'] = ', '.join(sources_tried)
                 
-                return Response(response_data, status=status.HTTP_400_BAD_REQUEST)
+                return UnifiedResponse.error(
+                    message=error_msg,
+                    data=response_data,
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
                 
         except Exception as e:
             logger.error(f"企业信息采集失败: {str(e)}")
-            return Response({
-                'success': False,
-                'message': f'采集服务异常，请稍后重试或手动录入企业信息',
-                'error_detail': str(e),
-                'company_name': company_name
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return UnifiedResponse.error(
+                message='采集服务异常，请稍后重试或手动录入企业信息',
+                data={'error_detail': str(e), 'company_name': company_name},
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     @action(detail=False, methods=['post'])
     @throttle_classes([EnterpriseBatchCollectThrottle])
@@ -239,13 +245,12 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
         max_concurrent = request.data.get('max_concurrent', 5)
         
         if not company_names:
-            return Response(
-                {'message': '企业名称列表不能为空'},
-                status=status.HTTP_400_BAD_REQUEST
+            return UnifiedResponse.error(
+                message='企业名称列表不能为空',
+                status_code=status.HTTP_400_BAD_REQUEST
             )
         
         try:
-            import asyncio
             from openclaw.agents.enterprise_collector_agent import EnterpriseBatchCollectorAgent
             
             async def batch_collect():
@@ -265,23 +270,19 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
             loop.close()
             
             if result.success:
-                return Response({
-                    'success': True,
-                    'message': f'批量采集完成，成功{result.data["success_count"]}个，失败{result.data["failed_count"]}个',
-                    'data': result.data
-                })
+                return UnifiedResponse.success(
+                    data=result.data,
+                    message=f'批量采集完成，成功{result.data["success_count"]}个，失败{result.data["failed_count"]}个'
+                )
             else:
-                return Response({
-                    'success': False,
-                    'message': result.error
-                }, status=status.HTTP_400_BAD_REQUEST)
-                
+                return UnifiedResponse.error(message=result.error, status_code=status.HTTP_400_BAD_REQUEST)
+
         except Exception as e:
             logger.error(f"批量采集失败: {str(e)}")
-            return Response({
-                'success': False,
-                'message': f'批量采集失败: {str(e)}'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return UnifiedResponse.error(
+                message='批量采集失败，请稍后重试',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     @action(detail=False, methods=['post'])
     def search_online(self, request):
@@ -297,13 +298,12 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
         source = request.data.get('source', 'auto')
         
         if not company_name:
-            return Response(
-                {'message': '企业名称不能为空'},
-                status=status.HTTP_400_BAD_REQUEST
+            return UnifiedResponse.error(
+                message='企业名称不能为空',
+                status_code=status.HTTP_400_BAD_REQUEST
             )
         
         try:
-            import asyncio
             from openclaw.skill_registry import skill_registry
             
             async def search():
@@ -320,23 +320,19 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
             loop.close()
             
             if result.success:
-                return Response({
-                    'success': True,
-                    'data': result.data,
-                    'source': result.metadata.get('source')
-                })
+                return UnifiedResponse.success(
+                    data=result.data,
+                    message='搜索成功'
+                )
             else:
-                return Response({
-                    'success': False,
-                    'message': result.error
-                }, status=status.HTTP_400_BAD_REQUEST)
-                
+                return UnifiedResponse.error(message=result.error, status_code=status.HTTP_400_BAD_REQUEST)
+
         except Exception as e:
             logger.error(f"在线搜索企业失败: {str(e)}")
-            return Response({
-                'success': False,
-                'message': f'搜索失败: {str(e)}'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return UnifiedResponse.error(
+                message=f'搜索失败: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @action(detail=True, methods=['post'])
     def index_to_vector(self, request, pk=None):
@@ -360,17 +356,17 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
             )
 
             if success:
-                return Response({'message': '企业信息已成功索引到向量存储'})
+                return UnifiedResponse.success(message='企业信息已成功索引到向量存储')
             else:
-                return Response(
-                    {'message': '索引失败，请检查企业信息是否完整'},
-                    status=status.HTTP_400_BAD_REQUEST
+                return UnifiedResponse.error(
+                    message='索引失败，请检查企业信息是否完整',
+                    status_code=status.HTTP_400_BAD_REQUEST
                 )
         except Exception as e:
             logger.error(f"索引企业失败: {str(e)}")
-            return Response(
-                {'message': f'索引失败: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            return UnifiedResponse.error(
+                message=f'索引失败: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
     def _build_enterprise_text(self, enterprise):
@@ -383,15 +379,15 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
         if hasattr(enterprise, 'business_scope') and enterprise.business_scope:
             parts.append(f"经营范围: {enterprise.business_scope}")
 
-        if hasattr(enterprise, 'industry') and enterprise.industry:
-            parts.append(f"行业: {enterprise.industry}")
+        if hasattr(enterprise, 'enterprise_type') and enterprise.enterprise_type:
+            parts.append(f"行业: {enterprise.enterprise_type}")
 
         if hasattr(enterprise, 'qualifications'):
             for qual in enterprise.qualifications.filter(is_valid=True)[:5]:
                 if qual.qualification_name:
                     parts.append(f"资质: {qual.qualification_name}")
-                if qual.scope:
-                    parts.append(f"资质范围: {qual.scope}")
+                if qual.qualification_category:
+                    parts.append(f"资质范围: {qual.qualification_category}")
 
         if hasattr(enterprise, 'performances'):
             for perf in enterprise.performances.all()[:5]:
@@ -405,7 +401,7 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
     @action(detail=False, methods=['post'])
     def batch_index(self, request):
         """
-        批量索引企业到向量存储
+        批量索引企业到向量存储（使用VectorTransaction保证数据一致性）
         """
         enterprise_ids = request.data.get('enterprise_ids', [])
 
@@ -438,25 +434,25 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
                     logger.error(f"构建企业文本失败 {enterprise.name}: {str(e)}")
 
             if batch_data:
-                count = enterprise_vector_store.batch_add_enterprises(batch_data)
-                return Response({
-                    'message': f'批量索引完成',
-                    'success_count': count,
+                with VectorTransaction() as vt:
+                    vt.batch_add_vectors('enterprise_vectors', batch_data)
+
+                return UnifiedResponse.success(data={
+                    'success_count': len(batch_data),
                     'failed_count': 0,
                     'total': len(batch_data)
-                })
+                }, message='批量索引完成（VectorTransaction模式）')
             else:
-                return Response({
-                    'message': '没有可索引的企业',
+                return UnifiedResponse.success(data={
                     'success_count': 0,
                     'failed_count': 0,
                     'total': 0
-                })
+                }, message='没有可索引的企业')
         except Exception as e:
             logger.error(f"批量索引失败: {str(e)}")
-            return Response(
-                {'message': f'批量索引失败: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            return UnifiedResponse.error(
+                message=f'批量索引失败: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
     @action(detail=False, methods=['get'])
@@ -464,14 +460,11 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
         """
         获取各平台Cookie状态
         """
-        from crawler.cookie_manager import cookie_manager
-        
+        from common.crawler import cookie_manager
+
         status_data = cookie_manager.get_status()
-        
-        return Response({
-            'success': True,
-            'data': status_data
-        })
+
+        return UnifiedResponse.success(data=status_data)
     
     @action(detail=False, methods=['post'])
     def import_cookies(self, request):
@@ -486,8 +479,8 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
           - cookie_list: Cookie列表 [{"name": "xxx", "value": "xxx"}]
         - expire_hours: 过期时间（小时），默认24
         """
-        from crawler.cookie_manager import cookie_manager
-        
+        from common.crawler import cookie_manager
+
         platform = request.data.get('platform')
         cookie_string = request.data.get('cookie_string')
         cookie_json = request.data.get('cookie_json')
@@ -495,41 +488,34 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
         expire_hours = request.data.get('expire_hours', 24)
         
         if not platform:
-            return Response({
-                'success': False,
-                'message': '请指定平台名称'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
+            return UnifiedResponse.error(message='请指定平台名称', status_code=status.HTTP_400_BAD_REQUEST)
+
         if not any([cookie_string, cookie_json, cookie_list]):
-            return Response({
-                'success': False,
-                'message': '请提供Cookie数据'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
+            return UnifiedResponse.error(message='请提供Cookie数据', status_code=status.HTTP_400_BAD_REQUEST)
+
         success = cookie_manager.import_from_browser(
             platform=platform,
             cookie_string=cookie_string,
             cookie_json=cookie_json,
             cookie_list=cookie_list
         )
-        
+
         if success:
             cookie_manager.save_cookies(
                 platform=platform,
                 cookies=cookie_manager.get_cookies(platform),
                 expire_hours=expire_hours
             )
-            
-            return Response({
-                'success': True,
-                'message': f'{platform} Cookie导入成功',
-                'expire_hours': expire_hours
-            })
+
+            return UnifiedResponse.success(
+                data={'expire_hours': expire_hours},
+                message=f'{platform} Cookie导入成功'
+            )
         else:
-            return Response({
-                'success': False,
-                'message': 'Cookie导入失败，请检查格式'
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return UnifiedResponse.error(
+                message='Cookie导入失败，请检查格式',
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
     
     @action(detail=False, methods=['post'])
     def clear_cookies(self, request):
@@ -539,16 +525,13 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
         请求参数:
         - platform: 平台名称（可选，不传则清除所有）
         """
-        from crawler.cookie_manager import cookie_manager
-        
+        from common.crawler import cookie_manager
+
         platform = request.data.get('platform')
-        
+
         cookie_manager.clear_cookies(platform)
         
-        return Response({
-            'success': True,
-            'message': f'已清除 {platform or "所有平台"} 的Cookie'
-        })
+        return UnifiedResponse.success(message=f'已清除 {platform or "所有平台"} 的Cookie')
     
     @action(detail=False, methods=['post'])
     def collect_with_cookies(self, request):
@@ -567,42 +550,42 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
         save_to_db = request.data.get('save_to_db', True)
         
         if not company_name:
-            return Response({
-                'success': False,
-                'message': '请提供企业名称'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
+            return UnifiedResponse.error(message='请提供企业名称', status_code=status.HTTP_400_BAD_REQUEST)
+
         try:
-            result = asyncio.run(collect_with_cookies(company_name, source))
-            
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(collect_with_cookies(company_name, source))
+            finally:
+                loop.close()
+
             if result.get('success'):
                 data = result.get('data', {})
-                
+
                 if save_to_db:
                     saved = self._save_enterprise_data(data, request.user)
                     if saved:
                         data['saved_to_db'] = True
                         data['enterprise_id'] = saved.id
-                
-                return Response({
-                    'success': True,
-                    'data': data,
-                    'source': result.get('source'),
-                    'sources_tried': result.get('sources_tried', [])
-                })
+
+                return UnifiedResponse.success(
+                    data=data,
+                    message='采集成功'
+                )
             else:
-                return Response({
-                    'success': False,
-                    'message': result.get('error', '采集失败'),
-                    'sources_tried': result.get('sources_tried', [])
-                }, status=status.HTTP_400_BAD_REQUEST)
-                
+                return UnifiedResponse.error(
+                    message=result.get('error', '采集失败'),
+                    data={'sources_tried': result.get('sources_tried', [])},
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
         except Exception as e:
             logger.error(f"Cookie采集失败: {str(e)}")
-            return Response({
-                'success': False,
-                'message': f'采集失败: {str(e)}'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return UnifiedResponse.error(
+                message=f'采集失败: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     def _save_enterprise_data(self, data: dict, user) -> Optional['Enterprise']:
         """保存企业数据到数据库"""
@@ -630,7 +613,7 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
                     'created_by': user,
                 }
             )
-            
+
             logger.info(f"企业数据已保存: {enterprise.name}")
             return enterprise
             
@@ -659,10 +642,14 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
                 threshold
             )
             
+            enterprise_ids_in_results = [r['enterprise_id'] for r in results]
+            enterprises = Enterprise.objects.filter(id__in=enterprise_ids_in_results)
+            enterprise_map = {e.id: e for e in enterprises}
+
             enriched_results = []
             for result in results:
-                try:
-                    enterprise = Enterprise.objects.get(id=result['enterprise_id'])
+                enterprise = enterprise_map.get(result['enterprise_id'])
+                if enterprise:
                     enriched_results.append({
                         'enterprise_id': enterprise.id,
                         'enterprise_name': enterprise.name,
@@ -672,20 +659,18 @@ class EnterpriseViewSet(AuthenticatedModelViewSet):
                         'province': enterprise.province,
                         'city': enterprise.city
                     })
-                except Enterprise.DoesNotExist:
-                    continue
             
-            return Response({
+            return UnifiedResponse.success(data={
                 'total_count': len(enriched_results),
                 'threshold': threshold,
                 'results': enriched_results
             })
-            
+
         except Exception as e:
             logger.error(f"语义匹配失败: {str(e)}")
-            return Response(
-                {'message': f'匹配失败: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            return UnifiedResponse.error(
+                message=f'匹配失败: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
 
@@ -697,7 +682,7 @@ class EnterpriseQualificationViewSet(AuthenticatedModelViewSet):
     serializer_class = EnterpriseQualificationSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['enterprise', 'qualification_category', 'is_valid', 'is_primary']
-    ordering = ['-is_primary', '-expiry_date']
+    ordering = ['-created_at']
     
     @action(detail=False, methods=['get'])
     def expiring(self, request):
@@ -722,7 +707,7 @@ class EnterpriseQualificationViewSet(AuthenticatedModelViewSet):
         ).order_by('expiry_date')
         
         serializer = self.get_serializer(qualifications, many=True)
-        return Response(serializer.data)
+        return UnifiedResponse.success(data=serializer.data)
 
     @action(detail=False, methods=['post'])
     def match_requirements(self, request):
@@ -738,9 +723,9 @@ class EnterpriseQualificationViewSet(AuthenticatedModelViewSet):
         enterprise_id = request.data.get('enterprise_id')
         
         if not requirements:
-            return Response(
-                {'message': '请提供资质要求列表'},
-                status=status.HTTP_400_BAD_REQUEST
+            return UnifiedResponse.error(
+                message='请提供资质要求列表',
+                status_code=status.HTTP_400_BAD_REQUEST
             )
         
         qualifications = self.queryset.filter(is_valid=True)
@@ -790,7 +775,7 @@ class EnterpriseQualificationViewSet(AuthenticatedModelViewSet):
                 'matches': matched_quals[:5]
             })
         
-        return Response({
+        return UnifiedResponse.success(data={
             'total_requirements': len(requirements),
             'results': results
         })
@@ -838,44 +823,7 @@ class EnterpriseContactViewSet(AuthenticatedModelViewSet):
     serializer_class = EnterpriseContactSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['enterprise', 'contact_type', 'is_primary', 'is_active']
-    ordering = ['-is_primary', 'name']
-
-
-class EnterpriseBidConfigViewSet(AuthenticatedModelViewSet):
-    """
-    企业投标配置视图集
-    """
-    queryset = EnterpriseBidConfig.objects.select_related('enterprise')
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['enterprise']
-    
-    def get_serializer_class(self):
-        if self.action in ['create', 'update', 'partial_update']:
-            return EnterpriseBidConfigCreateSerializer
-        return EnterpriseBidConfigSerializer
-    
-    @action(detail=True, methods=['get'])
-    def template_variables(self, request, pk=None):
-        """
-        获取标书模板变量
-        """
-        bid_config = self.get_object()
-        from services.document_generator import DocumentGenerator
-        generator = DocumentGenerator()
-        variables = generator.get_enterprise_variables(bid_config.enterprise)
-        return Response(variables)
-    
-    @action(detail=False, methods=['get'])
-    def options(self, request):
-        """
-        获取选项配置
-        """
-        return Response({
-            'builder_levels': dict(EnterpriseBidConfig.BUILDER_LEVEL_CHOICES),
-            'builder_majors': dict(EnterpriseBidConfig.BUILDER_MAJOR_CHOICES),
-            'structure_types': dict(EnterpriseBidConfig.STRUCTURE_TYPE_CHOICES),
-        })
-
+    ordering = ['-created_at']
 
 class EnterpriseMatchRuleViewSet(AuthenticatedModelViewSet):
     """
@@ -885,170 +833,7 @@ class EnterpriseMatchRuleViewSet(AuthenticatedModelViewSet):
     serializer_class = EnterpriseMatchRuleSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['enterprise', 'rule_type', 'is_active']
-    ordering = ['-priority', '-weight', 'name']
-
-
-class EnterpriseMatchResultViewSet(AuthenticatedReadOnlyViewSet):
-    """
-    企业匹配结果视图集
-    """
-    queryset = EnterpriseMatchResult.objects.select_related('enterprise')
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['enterprise', 'match_level', 'is_read', 'is_favorite', 'is_applied']
-    search_fields = ['tender_title']
-    ordering = ['-match_score', '-publish_date', '-created_at']
-    
-    def get_serializer_class(self):
-        """
-        根据动作选择序列化器
-        """
-        if self.action == 'list':
-            return EnterpriseMatchResultListSerializer
-        return EnterpriseMatchResultSerializer
-    
-    @action(detail=True, methods=['post'])
-    def mark_read(self, request, pk=None):
-        """
-        标记为已读
-        """
-        result = self.get_object()
-        result.is_read = True
-        result.save()
-        
-        return Response({'message': '已标记为已读'})
-    
-    @action(detail=True, methods=['post'])
-    def toggle_favorite(self, request, pk=None):
-        """
-        切换收藏状态
-        """
-        result = self.get_object()
-        result.is_favorite = not result.is_favorite
-        result.save()
-        
-        return Response({
-            'message': '已收藏' if result.is_favorite else '已取消收藏',
-            'is_favorite': result.is_favorite
-        })
-    
-    @action(detail=True, methods=['post'])
-    def mark_applied(self, request, pk=None):
-        """
-        标记为已投标
-        """
-        result = self.get_object()
-        result.is_applied = True
-        result.save()
-        
-        return Response({'message': '已标记为已投标'})
-    
-    @action(detail=False, methods=['post'])
-    def batch_mark_read(self, request):
-        """
-        批量标记已读
-        """
-        ids = request.data.get('ids', [])
-        
-        if not ids:
-            return Response({'message': '缺少ID列表'}, status=status.HTTP_400_BAD_REQUEST)
-        
-        updated = self.queryset.filter(id__in=ids).update(is_read=True)
-        
-        return Response({'message': f'成功标记 {updated} 条记录为已读'})
-
-
-class EnterpriseMatchViewSet(viewsets.ViewSet):
-    """
-    企业匹配视图集
-    """
-    permission_classes = [IsAuthenticated]
-    
-    def create(self, request):
-        """
-        执行企业匹配
-        """
-        serializer = MatchTenderSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        
-        tender_data = serializer.validated_data
-        enterprise_ids = tender_data.pop('enterprise_ids', None)
-        
-        try:
-            matcher = EnterpriseMatcher()
-            results = matcher.match_tender(tender_data, enterprise_ids)
-            
-            result_serializer = EnterpriseMatchResultListSerializer(results, many=True)
-            
-            return Response({
-                'total_count': len(results),
-                'high_match_count': len([r for r in results if r.match_level == 'high']),
-                'medium_match_count': len([r for r in results if r.match_level == 'medium']),
-                'low_match_count': len([r for r in results if r.match_level == 'low']),
-                'results': result_serializer.data
-            })
-            
-        except Exception as e:
-            logger.error(f"企业匹配失败: {str(e)}")
-            return Response({
-                'message': f'匹配失败: {str(e)}'
-            }, status=status.HTTP_400_BAD_REQUEST)
-    
-    @action(detail=False, methods=['post'])
-    def match_from_crawl_result(self, request):
-        """
-        从采集结果匹配企业
-        """
-        from apps.crawler.models import CrawlResult
-        
-        crawl_result_id = request.data.get('crawl_result_id')
-        enterprise_ids = request.data.get('enterprise_ids')
-        
-        if not crawl_result_id:
-            return Response({'message': '缺少采集结果ID'}, status=status.HTTP_400_BAD_REQUEST)
-        
-        try:
-            crawl_result = CrawlResult.objects.get(id=crawl_result_id)
-        except CrawlResult.DoesNotExist:
-            return Response({'message': '采集结果不存在'}, status=status.HTTP_404_NOT_FOUND)
-        
-        tender_data = {
-            'title': crawl_result.title,
-            'url': crawl_result.detail_url or crawl_result.source_url,
-            'source': crawl_result.session.website_template.name if crawl_result.session.website_template else '',
-            'publish_date': crawl_result.publish_date,
-            'deadline_date': crawl_result.deadline_date,
-            'region': crawl_result.region,
-            'industry': crawl_result.industry,
-            'category': crawl_result.category,
-            'budget': float(crawl_result.budget) if crawl_result.budget else None,
-            'description': crawl_result.description,
-        }
-        
-        try:
-            matcher = EnterpriseMatcher()
-            results = matcher.match_tender(tender_data, enterprise_ids)
-            
-            crawl_result.status = 'matched'
-            crawl_result.matched_companies = [
-                {'enterprise_id': r.enterprise_id, 'enterprise_name': r.enterprise.name, 
-                 'match_score': r.match_score, 'match_level': r.match_level}
-                for r in results
-            ]
-            crawl_result.save()
-            
-            result_serializer = EnterpriseMatchResultListSerializer(results, many=True)
-            
-            return Response({
-                'total_count': len(results),
-                'results': result_serializer.data
-            })
-            
-        except Exception as e:
-            logger.error(f"从采集结果匹配企业失败: {str(e)}")
-            return Response({
-                'message': f'匹配失败: {str(e)}'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
+    ordering = ['-created_at']
 
 class EnterpriseDocumentViewSet(AuthenticatedModelViewSet):
     """
@@ -1059,7 +844,7 @@ class EnterpriseDocumentViewSet(AuthenticatedModelViewSet):
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['enterprise', 'document_type', 'status', 'is_primary', 'is_verified', 'recognition_status', 'is_ai_reference', 'is_bid_material']
     search_fields = ['document_name', 'document_no', 'description']
-    ordering = ['-is_primary', 'document_type', '-expiry_date']
+    ordering = ['-created_at']
 
     def get_serializer_class(self):
         """
@@ -1139,7 +924,7 @@ class EnterpriseDocumentViewSet(AuthenticatedModelViewSet):
         ).order_by('expiry_date')
         
         serializer = self.get_serializer(documents, many=True)
-        return Response(serializer.data)
+        return UnifiedResponse.success(data=serializer.data)
 
     @action(detail=False, methods=['get'])
     def expired(self, request):
@@ -1154,7 +939,7 @@ class EnterpriseDocumentViewSet(AuthenticatedModelViewSet):
         ).order_by('-expiry_date')
         
         serializer = self.get_serializer(documents, many=True)
-        return Response(serializer.data)
+        return UnifiedResponse.success(data=serializer.data)
 
     @action(detail=False, methods=['get'])
     def statistics(self, request):
@@ -1189,7 +974,7 @@ class EnterpriseDocumentViewSet(AuthenticatedModelViewSet):
         stats['recognition'] = recognition_stats
         
         serializer = EnterpriseDocumentStatisticsSerializer(stats)
-        return Response(serializer.data)
+        return UnifiedResponse.success(data=serializer.data)
 
     @action(detail=False, methods=['get'])
     def by_type(self, request):
@@ -1200,17 +985,14 @@ class EnterpriseDocumentViewSet(AuthenticatedModelViewSet):
         enterprise_id = request.query_params.get('enterprise_id')
         
         if not document_type:
-            return Response(
-                {'message': '请提供证书类型'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return UnifiedResponse.error(message='请提供证书类型')
         
         queryset = self.queryset.filter(document_type=document_type)
         if enterprise_id:
             queryset = queryset.filter(enterprise_id=enterprise_id)
         
         serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
+        return UnifiedResponse.success(data=serializer.data)
 
     @action(detail=True, methods=['post'])
     def verify(self, request, pk=None):
@@ -1230,7 +1012,7 @@ class EnterpriseDocumentViewSet(AuthenticatedModelViewSet):
             ip_address=get_client_ip(request)
         )
         
-        return Response({'message': '证书已验证'})
+        return UnifiedResponse.success(message='证书已验证')
 
     @action(detail=True, methods=['post'])
     def set_primary(self, request, pk=None):
@@ -1254,10 +1036,10 @@ class EnterpriseDocumentViewSet(AuthenticatedModelViewSet):
             action_type='set_primary',
             is_success=True,
             operated_by=request.user,
-            ip_address=self._get_client_ip(request)
+            ip_address=get_client_ip(request)
         )
         
-        return Response({'message': '已设置为主要证书'})
+        return UnifiedResponse.success(message='已设置为主要证书')
 
     @action(detail=False, methods=['get'])
     def options(self, request):
@@ -1266,7 +1048,7 @@ class EnterpriseDocumentViewSet(AuthenticatedModelViewSet):
         """
         from .models import EnterpriseDocument
         
-        return Response({
+        return UnifiedResponse.success(data={
             'document_types': dict(EnterpriseDocument.DOCUMENT_TYPE_CHOICES),
             'document_statuses': dict(EnterpriseDocument.DOCUMENT_STATUS_CHOICES),
             'recognition_statuses': {
@@ -1285,10 +1067,7 @@ class EnterpriseDocumentViewSet(AuthenticatedModelViewSet):
         ids = request.data.get('ids', [])
         
         if not ids:
-            return Response(
-                {'message': '请提供要删除的证书ID列表'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return UnifiedResponse.error(message='请提供要删除的证书ID列表')
         
         deleted_count = 0
         for doc_id in ids:
@@ -1299,7 +1078,7 @@ class EnterpriseDocumentViewSet(AuthenticatedModelViewSet):
                     action_type='delete',
                     is_success=True,
                     operated_by=request.user,
-                    ip_address=self._get_client_ip(request),
+                    ip_address=get_client_ip(request),
                     action_detail=f'批量删除证书: {document.document_name}'
                 )
                 deleted_count += 1
@@ -1312,14 +1091,14 @@ class EnterpriseDocumentViewSet(AuthenticatedModelViewSet):
             action_type='batch_delete',
             is_success=True,
             operated_by=request.user,
-            ip_address=self._get_client_ip(request),
+            ip_address=get_client_ip(request),
             action_detail=f'批量删除了 {deleted} 个证书'
         )
         
-        return Response({
-            'message': f'成功删除 {deleted} 个证书',
-            'deleted_count': deleted
-        })
+        return UnifiedResponse.success(
+            data={'deleted_count': deleted},
+            message=f'成功删除 {deleted} 个证书'
+        )
 
     @action(detail=True, methods=['post'])
     def recognize(self, request, pk=None):
@@ -1334,21 +1113,21 @@ class EnterpriseDocumentViewSet(AuthenticatedModelViewSet):
             
             validation = service.validate_file(document.file_path)
             if not validation.get('valid'):
-                return Response({
-                    'success': False,
-                    'error': validation.get('error')
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
+                return UnifiedResponse.error(
+                    message=validation.get('error', '文件验证失败'),
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
             result = service.recognize_document(document, user=request.user)
-            
-            return Response(result)
-            
+
+            return UnifiedResponse.success(data=result)
+
         except Exception as e:
             logger.error(f"证书识别失败: {str(e)}")
-            return Response({
-                'success': False,
-                'error': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return UnifiedResponse.error(
+                message=f'证书识别失败: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @action(detail=True, methods=['post'])
     def compare(self, request, pk=None):
@@ -1356,26 +1135,26 @@ class EnterpriseDocumentViewSet(AuthenticatedModelViewSet):
         与数据库比对
         """
         document = self.get_object()
-        
+
         if document.recognition_status != 'completed':
-            return Response({
-                'success': False,
-                'error': '证书尚未完成识别，请先进行识别'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
+            return UnifiedResponse.error(
+                message='证书尚未完成识别，请先进行识别',
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
         try:
             from services.document_recognition_service import DocumentRecognitionService
             service = DocumentRecognitionService()
             result = service.compare_with_database(document, user=request.user)
-            
-            return Response(result)
-            
+
+            return UnifiedResponse.success(data=result)
+
         except Exception as e:
             logger.error(f"比对失败: {str(e)}")
-            return Response({
-                'success': False,
-                'error': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return UnifiedResponse.error(
+                message=f'比对失败: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @action(detail=True, methods=['post'])
     def update_from_recognition(self, request, pk=None):
@@ -1385,26 +1164,26 @@ class EnterpriseDocumentViewSet(AuthenticatedModelViewSet):
         document = self.get_object()
         
         if document.recognition_status != 'completed':
-            return Response({
-                'success': False,
-                'error': '证书尚未完成识别，请先进行识别'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
+            return UnifiedResponse.error(
+                message='证书尚未完成识别，请先进行识别',
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
         fields = request.data.get('fields', None)
-        
+
         try:
             from services.document_recognition_service import DocumentRecognitionService
             service = DocumentRecognitionService()
             result = service.update_from_recognition(document, fields=fields, user=request.user)
-            
-            return Response(result)
-            
+
+            return UnifiedResponse.success(data=result)
+
         except Exception as e:
             logger.error(f"更新失败: {str(e)}")
-            return Response({
-                'success': False,
-                'error': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return UnifiedResponse.error(
+                message=f'更新失败: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @action(detail=False, methods=['post'])
     def batch_recognize(self, request):
@@ -1414,24 +1193,21 @@ class EnterpriseDocumentViewSet(AuthenticatedModelViewSet):
         ids = request.data.get('ids', [])
         
         if not ids:
-            return Response(
-                {'message': '请提供要识别的证书ID列表'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
+            return UnifiedResponse.validation_error(errors=None, message='请提供要识别的证书ID列表')
+
         try:
             from services.document_recognition_service import DocumentRecognitionService
             service = DocumentRecognitionService()
             result = service.batch_recognize(ids, user=request.user)
-            
-            return Response(result)
-            
+
+            return UnifiedResponse.success(data=result)
+
         except Exception as e:
             logger.error(f"批量识别失败: {str(e)}")
-            return Response({
-                'success': False,
-                'error': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return UnifiedResponse.error(
+                message=f'批量识别失败: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @action(detail=False, methods=['get'])
     def audit_logs(self, request):
@@ -1446,29 +1222,18 @@ class EnterpriseDocumentViewSet(AuthenticatedModelViewSet):
         
         queryset = queryset[:100]
         serializer = DocumentAuditLogSerializer(queryset, many=True)
-        return Response(serializer.data)
-
-    def _get_client_ip(self, request):
-        """
-        获取客户端IP地址
-        """
-        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        if x_forwarded_for:
-            ip = x_forwarded_for.split(',')[0]
-        else:
-            ip = request.META.get('REMOTE_ADDR')
-        return ip
+        return UnifiedResponse.success(data=serializer.data)
 
 
-class EnterpriseKeyPersonnelViewSet(AuthenticatedModelViewSet):
+class EnterpriseKeyPersonnelViewSet(BaseViewSet):
     """
     企业关键人员视图集
     """
     queryset = EnterpriseKeyPersonnel.objects.select_related('enterprise')
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['enterprise', 'personnel_type', 'certificate_status', 'is_available']
-    search_fields = ['name', 'certificate_name', 'certificate_number']
-    ordering = ['-is_available', 'expiry_date']
+    search_fields = ['name', 'certificate_major', 'certificate_number', 'builder_certificate']
+    ordering = ['-created_at']
 
     def get_serializer_class(self):
         """
@@ -1501,7 +1266,7 @@ class EnterpriseKeyPersonnelViewSet(AuthenticatedModelViewSet):
         ).order_by('expiry_date')
 
         serializer = self.get_serializer(personnel, many=True)
-        return Response(serializer.data)
+        return UnifiedResponse.success(data=serializer.data)
 
     @action(detail=False, methods=['get'])
     def expired(self, request):
@@ -1516,7 +1281,7 @@ class EnterpriseKeyPersonnelViewSet(AuthenticatedModelViewSet):
         ).order_by('-expiry_date')
 
         serializer = self.get_serializer(personnel, many=True)
-        return Response(serializer.data)
+        return UnifiedResponse.success(data=serializer.data)
 
     @action(detail=False, methods=['get'])
     def available(self, request):
@@ -1533,7 +1298,7 @@ class EnterpriseKeyPersonnelViewSet(AuthenticatedModelViewSet):
             queryset = queryset.filter(personnel_type=personnel_type)
 
         serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
+        return UnifiedResponse.success(data=serializer.data)
 
     @action(detail=True, methods=['post'])
     def toggle_availability(self, request, pk=None):
@@ -1544,7 +1309,7 @@ class EnterpriseKeyPersonnelViewSet(AuthenticatedModelViewSet):
         personnel.is_available = not personnel.is_available
         personnel.save()
 
-        return Response({
-            'message': '已设置为可用' if personnel.is_available else '已设置为不可用',
-            'is_available': personnel.is_available
-        })
+        return UnifiedResponse.success(
+            data={'is_available': personnel.is_available},
+            message='已设置为可用' if personnel.is_available else '已设置为不可用'
+        )

@@ -8,8 +8,9 @@ from django.utils import timezone
 from django.db.models import Prefetch, F, Q
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
-from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from utils.responses import UnifiedResponse
 
 from .models import (
     MonitoredService, ServiceHealthRecord,
@@ -28,11 +29,14 @@ logger = logging.getLogger(__name__)
 
 
 class MonitoredServiceViewSet(viewsets.ModelViewSet):
-    """
-    被监控服务视图集
-    """
     queryset = MonitoredService.objects.all()
     serializer_class = MonitoredServiceSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'restart', 'check_health']:
+            return [IsAuthenticated(), IsAdminUser()]
+        return [IsAuthenticated()]
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -68,27 +72,25 @@ class MonitoredServiceViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def check_health(self, request, pk=None):
-        """手动触发健康检查"""
         service = self.get_object()
         result = ServiceHealthMonitor.check_single_service(service.id)
 
         if 'error' in result:
-            return Response({'error': result['error']}, status=status.HTTP_404_NOT_FOUND)
+            return UnifiedResponse.not_found(result['error'])
 
         serializer = MonitoredServiceSerializer(service)
-        return Response({
+        return UnifiedResponse.success(data={
             'service': serializer.data,
             'check_result': result
         })
 
     @action(detail=True, methods=['post'])
     def restart(self, request, pk=None):
-        """手动触发服务重启"""
         service = self.get_object()
 
-        can_restart, reason = ServiceRestartManager.can_restart(service)
+        can_restart, reason = ServiceRestartManager.can_restart(service, restart_type='manual')
         if not can_restart:
-            return Response({'error': reason}, status=status.HTTP_400_BAD_REQUEST)
+            return UnifiedResponse.error(message=reason)
 
         result = ServiceRestartManager.execute_restart(
             service,
@@ -99,32 +101,30 @@ class MonitoredServiceViewSet(viewsets.ModelViewSet):
         if result['success']:
             service.refresh_from_db()
             serializer = MonitoredServiceSerializer(service)
-            return Response({
+            return UnifiedResponse.success(data={
                 'message': result['message'],
                 'service': serializer.data
             })
         else:
-            error_msg = result.get('message', '重启失败')
-            if '不支持' in error_msg or '未找到' in error_msg or '无法' in error_msg or '未安装' in error_msg or '重启执行返回失败' in error_msg:
-                return Response({'error': error_msg}, status=status.HTTP_400_BAD_REQUEST)
-            return Response({'error': error_msg}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            error_msg = result.get('message') or '不支持此服务的重启'
+            unsupported_keywords = ['不支持', '未找到', '无法', '未安装', '重启执行返回失败', '重启失败', '启动进程失败', '需要管理员权限', '冷却中', '已达上限', '超时', 'Docker', '容器', 'No such container', '未部署', '嵌入式', '手动重启', '未运行且本地未找到']
+            if any(keyword in error_msg for keyword in unsupported_keywords):
+                return UnifiedResponse.error(message=error_msg)
+            return UnifiedResponse.server_error(message=error_msg)
 
     @action(detail=False, methods=['get'])
     def categories(self, request):
-        """获取所有服务类别"""
         categories = [
             {'value': choice[0], 'label': choice[1]}
             for choice in MonitoredService.category.field.choices
         ]
-        return Response(categories)
+        return UnifiedResponse.success(data=categories)
 
 
 class ServiceHealthRecordViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    健康检查记录视图集（只读）
-    """
     queryset = ServiceHealthRecord.objects.all()
     serializer_class = ServiceHealthRecordSerializer
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         queryset = ServiceHealthRecord.objects.all()
@@ -146,7 +146,6 @@ class ServiceHealthRecordViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=False, methods=['get'])
     def latest(self, request):
-        """获取每个服务的最新健康记录"""
         service_id = request.query_params.get('service_id')
         if service_id:
             records = ServiceHealthRecord.objects.filter(service_id=service_id).order_by('-timestamp')[:1]
@@ -158,11 +157,10 @@ class ServiceHealthRecordViewSet(viewsets.ReadOnlyModelViewSet):
                     records.append(latest)
 
         serializer = self.get_serializer(records, many=True)
-        return Response(serializer.data)
+        return UnifiedResponse.success(data=serializer.data)
 
     @action(detail=False, methods=['get'])
     def statistics(self, request):
-        """获取健康检查统计"""
         service_id = request.query_params.get('service_id')
         hours = int(request.query_params.get('hours', 24))
 
@@ -178,16 +176,16 @@ class ServiceHealthRecordViewSet(viewsets.ReadOnlyModelViewSet):
 
         avg_response_time = None
         try:
-            avg_record = queryset.filter(
+            from django.db.models import Avg
+            avg_result = queryset.filter(
                 is_healthy=True,
                 response_time_ms__isnull=False
-            ).only('response_time_ms').order_by('response_time_ms')[:1]
-            if avg_record:
-                avg_response_time = avg_record[0].response_time_ms
+            ).aggregate(avg_time=Avg('response_time_ms'))
+            avg_response_time = round(avg_result['avg_time'], 2) if avg_result['avg_time'] else None
         except Exception:
             pass
 
-        return Response({
+        return UnifiedResponse.success(data={
             'period_hours': hours,
             'total_checks': total,
             'healthy_checks': healthy,
@@ -198,11 +196,14 @@ class ServiceHealthRecordViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class ServiceAlertViewSet(viewsets.ModelViewSet):
-    """
-    服务告警视图集
-    """
     queryset = ServiceAlert.objects.all()
     serializer_class = ServiceAlertSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'resolve', 'resolve_all', 'send_notification']:
+            return [IsAuthenticated(), IsAdminUser()]
+        return [IsAuthenticated()]
 
     def get_serializer_class(self):
         if self.action in ['update', 'partial_update']:
@@ -233,21 +234,19 @@ class ServiceAlertViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def resolve(self, request, pk=None):
-        """解决告警"""
         alert = self.get_object()
         success = AlertManager.resolve_alert(alert.id, request.user.username if request.user.is_authenticated else 'manual')
         if success:
             alert.refresh_from_db()
             serializer = self.get_serializer(alert)
-            return Response(serializer.data)
-        return Response({'error': '解决告警失败'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return UnifiedResponse.success(data=serializer.data)
+        return UnifiedResponse.server_error(message='解决告警失败')
 
     @action(detail=False, methods=['post'])
     def resolve_all(self, request):
-        """批量解决告警"""
         alert_ids = request.data.get('alert_ids', [])
         if not alert_ids:
-            return Response({'error': '未指定告警ID'}, status=status.HTTP_400_BAD_REQUEST)
+            return UnifiedResponse.error(message='未指定告警ID')
 
         updated = ServiceAlert.objects.filter(
             id__in=alert_ids,
@@ -257,33 +256,29 @@ class ServiceAlertViewSet(viewsets.ModelViewSet):
             resolved_at=timezone.now()
         )
 
-        return Response({'resolved_count': updated})
+        return UnifiedResponse.success(data={'resolved_count': updated})
 
     @action(detail=False, methods=['get'])
     def pending(self, request):
-        """获取待处理告警"""
         alerts = AlertManager.get_pending_alerts()
         serializer = self.get_serializer(alerts, many=True)
-        return Response(serializer.data)
+        return UnifiedResponse.success(data=serializer.data)
 
     @action(detail=True, methods=['post'])
     def send_notification(self, request, pk=None):
-        """手动发送告警通知"""
         alert = self.get_object()
         success = AlertManager.send_alert_notification(alert)
         if success:
             alert.refresh_from_db()
             serializer = self.get_serializer(alert)
-            return Response(serializer.data)
-        return Response({'error': '发送通知失败'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return UnifiedResponse.success(data=serializer.data)
+        return UnifiedResponse.server_error(message='发送通知失败')
 
 
 class ServiceActionLogViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    服务操作日志视图集（只读）
-    """
     queryset = ServiceActionLog.objects.all()
     serializer_class = ServiceActionLogSerializer
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         queryset = ServiceActionLog.objects.all()
@@ -314,13 +309,9 @@ class ServiceActionLogViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class ServiceStatusDashboardView(APIView):
-    """
-    服务状态仪表盘视图
-    提供所有服务的当前状态概览
-    """
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        """获取服务状态仪表盘数据"""
         services = MonitoredService.objects.all()
 
         service_summaries = []
@@ -373,7 +364,7 @@ class ServiceStatusDashboardView(APIView):
             status__in=['pending', 'notified']
         ).count()
 
-        return Response({
+        return UnifiedResponse.success(data={
             'overall_status': overall_status,
             'statistics': {
                 'total': len(services),
@@ -389,29 +380,21 @@ class ServiceStatusDashboardView(APIView):
 
 
 class MonitorHealthCheckView(APIView):
-    """
-    触发全量健康检查的API视图
-    由Celery定时任务调用
-    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
 
     def post(self, request):
-        """触发全量健康检查"""
         result = ServiceHealthMonitor.check_all_services()
-        return Response(result)
+        return UnifiedResponse.success(data=result)
 
     def get(self, request):
-        """获取检查结果"""
         result = ServiceHealthMonitor.check_all_services()
-        return Response(result)
+        return UnifiedResponse.success(data=result)
 
 
 class MonitorAutoRecoveryView(APIView):
-    """
-    触发自动恢复流程的API视图
-    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
 
     def post(self, request):
-        """对所有异常服务执行自动恢复"""
         from django.db import models
 
         services = MonitoredService.objects.filter(
@@ -436,7 +419,7 @@ class MonitorAutoRecoveryView(APIView):
                 if alert:
                     AlertManager.send_alert_notification(alert)
 
-        return Response({
+        return UnifiedResponse.success(data={
             'processed_count': len(results),
             'results': results
         })

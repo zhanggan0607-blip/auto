@@ -3,7 +3,7 @@
 """
 import logging
 from django.db import transaction
-from django.db.models import Q, Count
+from django.db.models import Q, Count, Case, When, IntegerField
 from django.utils import timezone
 from django.core.cache import cache
 
@@ -22,7 +22,8 @@ class TenderService:
     
     @staticmethod
     def search_tenders(keyword=None, region=None, industry=None, status=None,
-                       start_date=None, end_date=None, is_favorite=None, is_read=None):
+                       start_date=None, end_date=None, is_favorite=None, is_read=None,
+                       source_name=None):
         """
         搜索招标项目
         
@@ -39,7 +40,9 @@ class TenderService:
         Returns:
             QuerySet: 招标项目查询集
         """
-        queryset = TenderProject.objects.select_related('source').prefetch_related('files')
+        queryset = TenderProject.objects.filter(is_deleted=False).select_related('source').annotate(
+            files_count=Count('files')
+        )
         
         if keyword:
             queryset = queryset.filter(
@@ -69,7 +72,10 @@ class TenderService:
         if is_read is not None:
             queryset = queryset.filter(is_read=is_read)
         
-        return queryset.order_by('-publish_date')
+        if source_name:
+            queryset = queryset.filter(source__name=source_name)
+        
+        return queryset.order_by('source__name', '-publish_date')
     
     @staticmethod
     @transaction.atomic
@@ -101,7 +107,8 @@ class TenderService:
         Returns:
             TenderProject: 招标项目对象
         """
-        tender = TenderProject.objects.get(pk=tender_id)
+        from django.shortcuts import get_object_or_404
+        tender = get_object_or_404(TenderProject, pk=tender_id)
         
         for field, value in kwargs.items():
             if hasattr(tender, field):
@@ -116,7 +123,7 @@ class TenderService:
     @transaction.atomic
     def batch_delete(tender_ids, user):
         """
-        批量删除招标项目
+        批量软删除招标项目
         
         Args:
             tender_ids: 招标项目ID列表
@@ -125,8 +132,8 @@ class TenderService:
         Returns:
             int: 删除数量
         """
-        count = TenderProject.objects.filter(id__in=tender_ids).delete()[0]
-        logger.info(f"批量删除招标项目: {tender_ids}, 操作人: {user.id}")
+        count = TenderProject.objects.filter(id__in=tender_ids).update(is_deleted=True)
+        logger.info(f"批量软删除招标项目: {tender_ids}, 操作人: {user.id}")
         return count
     
     @staticmethod
@@ -159,7 +166,8 @@ class TenderService:
         Returns:
             bool: 新的收藏状态
         """
-        tender = TenderProject.objects.get(pk=tender_id)
+        from django.shortcuts import get_object_or_404
+        tender = get_object_or_404(TenderProject, pk=tender_id)
         tender.is_favorite = not tender.is_favorite
         tender.save()
         return tender.is_favorite
@@ -189,17 +197,17 @@ class TenderService:
         if cached_data:
             return cached_data
         
-        data = {
-            'total': TenderProject.objects.count(),
-            'pending': TenderProject.objects.filter(status='pending').count(),
-            'submitted': TenderProject.objects.filter(status='submitted').count(),
-            'won': TenderProject.objects.filter(status='won').count(),
-            'lost': TenderProject.objects.filter(status='lost').count(),
-            'favorite': TenderProject.objects.filter(is_favorite=True).count(),
-            'unread': TenderProject.objects.filter(is_read=False).count(),
-            'collected': TenderProject.objects.filter(source__isnull=False).count(),
-        }
-        
+        stats = TenderProject.objects.aggregate(
+            total=Count('id'),
+            pending=Count(Case(When(status='pending', then=1), output_field=IntegerField())),
+            submitted=Count(Case(When(status='submitted', then=1), output_field=IntegerField())),
+            won=Count(Case(When(status='won', then=1), output_field=IntegerField())),
+            lost=Count(Case(When(status='lost', then=1), output_field=IntegerField())),
+            favorite=Count(Case(When(is_favorite=True, then=1), output_field=IntegerField())),
+            unread=Count(Case(When(is_read=False, then=1), output_field=IntegerField())),
+            collected=Count(Case(When(source__isnull=False, then=1), output_field=IntegerField())),
+        )
+        data = {k: v or 0 for k, v in stats.items()}
         cache.set(cache_key, data, TenderService.CACHE_TIMEOUT)
         return data
     
@@ -237,21 +245,25 @@ class TenderKeywordService:
     @staticmethod
     def match_keywords(text):
         """
-        匹配关键词
-        
+        匹配关键词（使用缓存优化）
+
         Args:
             text: 待匹配文本
-            
+
         Returns:
             list: 匹配的关键词列表
         """
-        keywords = TenderKeyword.objects.filter(is_active=True)
-        matched = []
-        
-        for kw in keywords:
-            if kw.keyword.lower() in text.lower():
-                matched.append(kw.keyword)
-        
+        cache_key = f"{TenderService.CACHE_PREFIX}:active_keywords"
+        keywords_data = cache.get(cache_key)
+
+        if keywords_data is None:
+            keywords = TenderKeyword.objects.filter(is_active=True)
+            keywords_data = [(kw.keyword, kw.keyword.lower()) for kw in keywords]
+            cache.set(cache_key, keywords_data, 300)
+
+        text_lower = text.lower()
+        matched = [kw for kw, kw_lower in keywords_data if kw_lower in text_lower]
+
         return matched
 
 
@@ -285,7 +297,8 @@ class CrawlerTaskService:
         Args:
             task_id: 任务ID
         """
-        task = CrawlerTask.objects.get(pk=task_id)
+        from django.shortcuts import get_object_or_404
+        task = get_object_or_404(CrawlerTask, pk=task_id)
         
         if task.status == 'running':
             raise ValueError('任务正在执行中')
@@ -308,7 +321,8 @@ class CrawlerTaskService:
             result_count: 结果数量
             error_message: 错误信息
         """
-        task = CrawlerTask.objects.get(pk=task_id)
+        from django.shortcuts import get_object_or_404
+        task = get_object_or_404(CrawlerTask, pk=task_id)
         task.status = 'failed' if error_message else 'completed'
         task.result_count = result_count
         task.error_message = error_message
@@ -352,7 +366,7 @@ class CrawlToTenderSyncService:
     @classmethod
     def sync_all(cls, limit=None):
         """
-        同步所有未同步的采集数据
+        同步所有未同步的采集数据（批量优化版）
 
         Args:
             limit: 限制同步数量
@@ -382,23 +396,80 @@ class CrawlToTenderSyncService:
             'errors': []
         }
 
-        for crawl_result in queryset:
+        batch_size = 100
+        crawl_results = list(queryset)
+
+        existing_tenders = {}
+        for t in TenderProject.objects.filter(
+            source_url__in=[r.source_url for r in crawl_results if r.source_url]
+        ):
+            if t.source_url not in existing_tenders:
+                existing_tenders[t.source_url] = t
+
+        to_create = []
+        to_update = []
+        crawl_to_update = []
+
+        for crawl_result in crawl_results:
             try:
-                result = cls.sync_single(crawl_result)
-                if result == 'created':
-                    stats['created'] += 1
-                elif result == 'updated':
-                    stats['updated'] += 1
-                else:
+                if not crawl_result.source_url:
                     stats['skipped'] += 1
+                    continue
+
+                tender_data = cls._map_fields(crawl_result)
+                tender_data['source'] = cls._get_or_create_source(crawl_result)
+                tender_data['keywords_matched'] = crawl_result.matched_companies or []
+
+                existing = existing_tenders.get(crawl_result.source_url)
+                if existing:
+                    for field, value in tender_data.items():
+                        if field != 'source_url':
+                            setattr(existing, field, value)
+                    to_update.append(existing)
+                    crawl_to_update.append((crawl_result, 'updated'))
+                else:
+                    to_create.append(TenderProject(**tender_data))
+                    crawl_to_update.append((crawl_result, 'created'))
             except Exception as e:
                 stats['failed'] += 1
                 stats['errors'].append({
                     'crawl_id': crawl_result.id,
-                    'title': crawl_result.title[:50],
+                    'title': crawl_result.title[:50] if crawl_result.title else '',
                     'error': str(e)
                 })
-                logger.error(f"同步失败: {crawl_result.id} - {str(e)}")
+                logger.error(f"同步准备失败: {crawl_result.id} - {str(e)}")
+
+        if to_create:
+            try:
+                TenderProject.objects.bulk_create(to_create, ignore_conflicts=True)
+                stats['created'] = len(to_create)
+            except Exception as e:
+                stats['failed'] += len(to_create)
+                logger.error(f"批量创建失败: {str(e)}")
+
+        if to_update:
+            update_fields = list(cls.FIELD_MAPPING.values())
+            update_fields = [f for f in update_fields if f != 'source_url']
+            update_fields.extend(['keywords_matched', 'source'])
+            try:
+                TenderProject.objects.bulk_update(to_update, update_fields, batch_size=batch_size)
+                stats['updated'] = len(to_update)
+            except Exception as e:
+                stats['failed'] += len(to_update)
+                logger.error(f"批量更新失败: {str(e)}")
+
+        synced_ids = []
+        for crawl_result, action in crawl_to_update:
+            if action in ('created', 'updated'):
+                crawl_result.status = cls.SYNC_STATUS_SYNCED
+                synced_ids.append(crawl_result)
+
+        if synced_ids:
+            CrawlResult.objects.filter(
+                id__in=[r.id for r in synced_ids]
+            ).update(status=cls.SYNC_STATUS_SYNCED)
+
+        cls._invalidate_cache()
 
         if stats['errors']:
             logger.warning(f"同步完成，存在 {stats['failed']} 条失败记录")
@@ -475,7 +546,7 @@ class CrawlToTenderSyncService:
             return None
 
         template = crawl_result.session.website_template
-        source_code = f"crawl_{template.code}"
+        source_code = template.code
         source_name = template.name
 
         source, _ = TenderSource.objects.get_or_create(
@@ -506,9 +577,9 @@ class CrawlToTenderSyncService:
         """
         from apps.crawler.models import CrawlResult
 
-        total = CrawlResult.objects.filter(status='matched').count()
         synced = CrawlResult.objects.filter(status=cls.SYNC_STATUS_SYNCED).count()
-        pending = total - synced
+        pending = CrawlResult.objects.filter(status__in=['pending', 'processed', 'matched']).count()
+        total = synced + pending
 
         tender_count = TenderProject.objects.count()
         tender_with_source = TenderProject.objects.filter(source__isnull=False).count()

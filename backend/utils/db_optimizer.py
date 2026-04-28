@@ -229,8 +229,42 @@ async def async_db_operation(operation: Callable, *args, **kwargs) -> Any:
             lambda: list(TenderProject.objects.all())
         )
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, lambda: operation(*args, **kwargs))
+
+
+def _batch_create(model: Type[Model], batch: List[dict], ignoreConflicts: bool = False):
+    instances = [model(**data) for data in batch]
+    if ignoreConflicts:
+        model.objects.bulk_create(instances, ignore_conflicts=True)
+    else:
+        model.objects.bulk_create(instances)
+
+
+def _batch_upsert(model: Type[Model], batch: List[dict], update_fields: List[str], ignoreConflicts: bool = False):
+    pk_name = model._meta.pk.name
+    instances = []
+    for data in batch:
+        pk_value = data.get(pk_name)
+        if pk_value:
+            try:
+                obj = model.objects.get(**{pk_name: pk_value})
+                for field in update_fields:
+                    if field in data:
+                        setattr(obj, field, data[field])
+                instances.append(obj)
+            except model.DoesNotExist:
+                instances.append(model(**data))
+        else:
+            instances.append(model(**data))
+
+    create_list = [obj for obj in instances if obj.pk is None]
+    update_list = [obj for obj in instances if obj.pk is not None]
+
+    if create_list:
+        model.objects.bulk_create(create_list, ignore_conflicts=ignoreConflicts)
+    if update_list and update_fields:
+        model.objects.bulk_update(update_list, update_fields)
 
 
 def batch_operation(
@@ -268,21 +302,14 @@ def batch_operation(
     batch = []
 
     for data in data_iter:
-        batch.append(model(**data))
+        batch.append(data)
 
         if len(batch) >= batch_size:
             try:
                 if update_fields:
-                    for item in batch:
-                        model.objects.update_or_create(
-                            defaults=item.__dict__,
-                            **{model._meta.pk.name: getattr(item, model._meta.pk.name)}
-                        )
+                    _batch_upsert(model, batch, update_fields, ignoreConflicts)
                 else:
-                    if ignoreConflicts:
-                        model.objects.bulk_create(batch, ignore_conflicts=True)
-                    else:
-                        model.objects.bulk_create(batch)
+                    _batch_create(model, batch, ignoreConflicts)
 
                 success_count += len(batch)
             except Exception as e:
@@ -295,16 +322,9 @@ def batch_operation(
     if batch:
         try:
             if update_fields:
-                for item in batch:
-                    model.objects.update_or_create(
-                        defaults=item.__dict__,
-                        **{model._meta.pk.name: getattr(item, model._meta.pk.name)}
-                    )
+                _batch_upsert(model, batch, update_fields, ignoreConflicts)
             else:
-                if ignoreConflicts:
-                    model.objects.bulk_create(batch, ignore_conflicts=True)
-                else:
-                    model.objects.bulk_create(batch)
+                _batch_create(model, batch, ignoreConflicts)
 
             success_count += len(batch)
         except Exception as e:
@@ -319,27 +339,31 @@ def batch_operation(
     }
 
 
-def optimize_queryset(queryset: QuerySet) -> QuerySet:
+def optimize_queryset(queryset: QuerySet, select_fields: list = None, prefetch_fields: list = None) -> QuerySet:
     """
     优化QuerySet
 
-    自动应用常见的优化策略：
-    - select_related for ForeignKey
-    - prefetch_related for ManyToMany
-    - only() to limit fields
+    按需应用优化策略，避免过度查询：
+    - select_related for ForeignKey/OneToOne (需显式指定)
+    - prefetch_related for ManyToMany (需显式指定)
+    - 未指定字段时仅自动添加OneToOne关系（不含M2M）
 
     Example:
         tenders = optimize_queryset(
-            TenderProject.objects.filter(status='open')
+            TenderProject.objects.filter(status='open'),
+            select_fields=['source'],
+            prefetch_fields=['files']
         )
     """
-    queryset = queryset.select_related(
-        *[f.name for f in queryset.model._meta.get_fields() if f.one_to_one]
-    )
+    if select_fields:
+        queryset = queryset.select_related(*select_fields)
+    else:
+        queryset = queryset.select_related(
+            *[f.name for f in queryset.model._meta.get_fields() if f.one_to_one]
+        )
 
-    queryset = queryset.prefetch_related(
-        *[f.name for f in queryset.model._meta.get_fields() if f.many_to_many]
-    )
+    if prefetch_fields:
+        queryset = queryset.prefetch_related(*prefetch_fields)
 
     return queryset
 
@@ -413,21 +437,67 @@ def setup_connection_pool():
 
                     with conn.cursor() as cursor:
                         cursor.execute("""
-                            SELECT SETTING
+                            SELECT NAME, SETTING
                             FROM pg_settings
                             WHERE NAME IN ('max_connections', 'shared_buffers')
+                            ORDER BY NAME
                         """)
                         results = cursor.fetchall()
+                        settings_map = {row[0]: row[1] for row in results}
                         logger.info(
                             f"Database connection pool configured: "
-                            f"max_connections={results[0][0] if len(results) > 0 else 'N/A'}, "
-                            f"shared_buffers={results[1][1] if len(results) > 1 else 'N/A'}"
+                            f"max_connections={settings_map.get('max_connections', 'N/A')}, "
+                            f"shared_buffers={settings_map.get('shared_buffers', 'N/A')}"
                         )
 
         logger.info("Database connection pool optimization initialized")
 
     except Exception as e:
         logger.error(f"Failed to setup connection pool: {e}")
+
+
+def check_connection_health():
+    """
+    检查数据库连接健康状态
+
+    Returns:
+        dict: 包含各数据库连接的健康状态
+    """
+    from django.conf import settings
+
+    health = {}
+    for alias in settings.DATABASES:
+        try:
+            conn = connections[alias]
+            conn.ensure_connection()
+
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+
+            health[alias] = {
+                'status': 'healthy',
+                'vendor': conn.vendor,
+            }
+
+            if conn.vendor == 'postgresql':
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT numbackends, pg_database_size(current_database())
+                        FROM pg_stat_database WHERE datname = current_database()
+                    """)
+                    row = cursor.fetchone()
+                    if row:
+                        health[alias]['active_connections'] = row[0]
+                        health[alias]['database_size_bytes'] = row[1]
+
+        except Exception as e:
+            health[alias] = {
+                'status': 'unhealthy',
+                'error': str(e),
+            }
+
+    return health
 
 
 __all__ = [
@@ -440,4 +510,5 @@ __all__ = [
     'optimize_queryset',
     'QueryAnalyzer',
     'setup_connection_pool',
+    'check_connection_health',
 ]

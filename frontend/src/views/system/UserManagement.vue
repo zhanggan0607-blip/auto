@@ -73,7 +73,7 @@
         </el-table-column>
         <el-table-column prop="created_at" label="创建时间" width="160">
           <template #default="{ row }">
-            {{ formatDate(row.created_at) }}
+            {{ formatDateTime(row.created_at) }}
           </template>
         </el-table-column>
         <el-table-column label="操作" width="180" fixed="right">
@@ -182,6 +182,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, Refresh } from '@element-plus/icons-vue'
 import { useUserStore } from '@/store/user'
 import { PageHeader } from '@/components'
+import { userAdminApi } from '@/api'
+import { formatDateTime } from '@/utils/date'
 
 const userStore = useUserStore()
 
@@ -237,12 +239,6 @@ const formRules = {
 }
 
 const dialogTitle = computed(() => isEdit.value ? '编辑用户' : '新增用户')
-
-const formatDate = (dateStr) => {
-  if (!dateStr) return '-'
-  const date = new Date(dateStr)
-  return date.toLocaleString('zh-CN')
-}
 
 const fetchUserList = async () => {
   loading.value = true

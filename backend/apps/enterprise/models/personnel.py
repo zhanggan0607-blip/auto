@@ -112,7 +112,6 @@ class EnterpriseKeyPersonnel(models.Model):
         indexes = [
             models.Index(fields=['enterprise', 'personnel_type']),
             models.Index(fields=['certificate_status']),
-            models.Index(fields=['personnel_id']),
         ]
 
     def __str__(self):

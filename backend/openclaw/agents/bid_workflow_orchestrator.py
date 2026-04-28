@@ -611,20 +611,113 @@ class BidWorkflowOrchestrator:
     async def _stage_upload(self, state: WorkflowState) -> Dict[str, Any]:
         """
         标书上传阶段
+        创建投标记录并存储标书文档
         """
+        from apps.bids.models import BidRecord
+        from apps.documents.models import GeneratedDocument
+        from apps.tenders.models import TenderProject
+        from django.conf import settings
+        import base64
+        import io
+        import os
+
         document = state.context.get('document', {})
+        tender_id = state.context.get('tender_id')
+        enterprise_id = state.context.get('enterprise_id')
+        bid_score = state.context.get('overall_score', 0)
 
-        state.results['upload'] = {
-            'status': 'pending',
-            'document': document.get('title'),
-            'message': '标书待上传'
-        }
+        try:
+            tender = TenderProject.objects.get(pk=tender_id)
+        except TenderProject.DoesNotExist:
+            logger.error(f"招标项目不存在: {tender_id}")
+            state.results['upload'] = {
+                'status': 'failed',
+                'message': f'招标项目不存在: {tender_id}'
+            }
+            return {
+                'success': False,
+                'continue': False,
+                'data': state.results['upload']
+            }
 
-        return {
-            'success': True,
-            'continue': True,
-            'data': state.results['upload']
-        }
+        try:
+            existing_record = BidRecord.objects.filter(tender_id=tender_id).first()
+            if existing_record:
+                logger.info(f"投标记录已存在: {existing_record.id}")
+                state.results['upload'] = {
+                    'status': 'existing',
+                    'bid_record_id': existing_record.id,
+                    'message': '投标记录已存在'
+                }
+                return {
+                    'success': True,
+                    'continue': True,
+                    'data': state.results['upload']
+                }
+
+            doc_content = document.get('content', '')
+            doc_title = document.get('title', f'投标文件-{tender.title}')
+
+            generated_doc = GeneratedDocument.objects.create(
+                title=doc_title,
+                content=doc_content,
+                document_type='bid',
+                file_format='md',
+                quality_score=bid_score,
+                project_name=tender.title,
+                industry=tender.industry,
+                project_type=getattr(tender, 'project_type', None)
+            )
+
+            bid_record = BidRecord.objects.create(
+                tender=tender,
+                bid_date=datetime.now().date(),
+                status='submitted' if bid_score >= 90 else 'pending',
+                notes=f'AI自动生成，综合评分{bid_score}分'
+            )
+            bid_record.bid_documents.add(generated_doc)
+
+            if enterprise_id:
+                from apps.enterprise.models import Enterprise
+                try:
+                    enterprise = Enterprise.objects.get(pk=enterprise_id)
+                    bid_record.bid_documents.first()
+                except Enterprise.DoesNotExist:
+                    pass
+
+            logger.info(f"投标记录创建成功: {bid_record.id}")
+
+            file_url = None
+            if generated_doc.file_path:
+                file_url = request.build_absolute_uri(generated_doc.file_path.url) if hasattr(generated_doc, 'file_path') and generated_doc.file_path else None
+
+            state.results['upload'] = {
+                'status': 'submitted',
+                'bid_record_id': bid_record.id,
+                'document_id': generated_doc.id,
+                'document_title': doc_title,
+                'bid_score': bid_score,
+                'file_url': file_url,
+                'message': '投标文件已提交'
+            }
+
+            return {
+                'success': True,
+                'continue': True,
+                'data': state.results['upload']
+            }
+
+        except Exception as e:
+            logger.error(f"标书上传失败: {str(e)}")
+            state.results['upload'] = {
+                'status': 'failed',
+                'message': f'上传失败: {str(e)}'
+            }
+            return {
+                'success': False,
+                'continue': False,
+                'data': state.results['upload']
+            }
 
     async def _stage_track(self, state: WorkflowState) -> Dict[str, Any]:
         """
@@ -657,10 +750,10 @@ class BidWorkflowOrchestrator:
         state: WorkflowState
     ):
         """
-        发送故障通知
+        发送故障通知（支持多渠道）
         """
         try:
-            from services.dingtalk_service import dingtalk_service
+            from services.unified_notification_service import unified_notification_service
 
             message = f"""## 🔴 工作流执行异常
 
@@ -689,12 +782,13 @@ class BidWorkflowOrchestrator:
 > 此通知由系统自动发送，请及时处理。
 """
 
-            await dingtalk_service.send_markdown(
+            results = unified_notification_service.send(
                 title=f"⚠️ 工作流异常: {stage_name}",
-                content=message
+                content=message,
+                markdown=True
             )
 
-            logger.info(f"故障通知已发送")
+            logger.info(f"故障通知已发送: {results}")
 
         except Exception as e:
             logger.warning(f"发送故障通知失败: {str(e)}")

@@ -43,6 +43,7 @@ class AgentModelConfigSerializer(serializers.ModelSerializer):
     """
     chat_model_id = serializers.CharField(source='chat_model.model_id', read_only=True, allow_null=True)
     chat_model_name = serializers.CharField(source='chat_model.name', read_only=True)
+    chat_provider_id = serializers.IntegerField(source='chat_model.provider.id', read_only=True, allow_null=True)
     reasoning_model_id = serializers.CharField(source='reasoning_model.model_id', read_only=True, allow_null=True)
     reasoning_model_name = serializers.CharField(source='reasoning_model.name', read_only=True)
 
@@ -71,41 +72,6 @@ class WorkflowStageSerializer(serializers.ModelSerializer):
         model = WorkflowStage
         fields = '__all__'
         read_only_fields = ['created_at', 'updated_at']
-
-
-class BidDecisionSerializer(serializers.ModelSerializer):
-    """
-    投标决策序列化器
-    """
-    class Meta:
-        model = BidDecision
-        fields = '__all__'
-        read_only_fields = ['created_at', 'updated_at']
-
-
-class DocumentReviewSerializer(serializers.ModelSerializer):
-    """
-    标书审核序列化器
-    """
-    class Meta:
-        model = DocumentReview
-        fields = '__all__'
-        read_only_fields = ['created_at']
-
-
-class BidWorkflowSerializer(serializers.ModelSerializer):
-    """
-    投标工作流序列化器
-    """
-    tender_title = serializers.CharField(source='tender.title', read_only=True)
-    stages = WorkflowStageSerializer(many=True, read_only=True)
-
-    class Meta:
-        model = BidWorkflow
-        fields = '__all__'
-        read_only_fields = ['created_at', 'updated_at']
-
-
 class AutomationConfigSerializer(serializers.ModelSerializer):
     """
     全自动化配置序列化器

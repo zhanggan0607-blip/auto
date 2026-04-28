@@ -6,7 +6,9 @@
 """
 import asyncio
 import logging
+import os
 import random
+import threading
 import time
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
@@ -26,6 +28,23 @@ class PyppeteerCrawler(ABC):
     支持多级降级策略
     """
 
+    BROWSER_CANDIDATES = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+    ]
+
+    @staticmethod
+    def find_browser_executable() -> Optional[str]:
+        for path in PyppeteerCrawler.BROWSER_CANDIDATES:
+            if os.path.exists(path):
+                logger.info(f"找到浏览器: {path}")
+                return path
+        logger.warning("未找到系统浏览器 (Chrome/Edge/Brave)")
+        return None
+
     def __init__(
         self,
         proxy_config: ProxyConfig = None,
@@ -43,7 +62,8 @@ class PyppeteerCrawler(ABC):
     async def init_browser(
         self,
         headless: bool = True,
-        fingerprint: BrowserFingerprint = None
+        fingerprint: BrowserFingerprint = None,
+        executablePath: str = None
     ) -> bool:
         """
         初始化浏览器
@@ -51,6 +71,7 @@ class PyppeteerCrawler(ABC):
         Args:
             headless: 是否无头模式
             fingerprint: 浏览器指纹
+            executablePath: 浏览器可执行文件路径，如果为None则使用pyppeteer下载的Chromium
             
         Returns:
             bool: 是否成功
@@ -80,7 +101,13 @@ class PyppeteerCrawler(ABC):
                 'args': args,
                 'defaultViewport': fingerprint.viewport,
                 'ignoreHTTPSErrors': True,
+                'handleSIGINT': False,
+                'handleSIGTERM': False,
+                'handleSIGHUP': False,
             }
+            
+            if executablePath:
+                launch_options['executablePath'] = executablePath
             
             if self.proxy_config.enabled and self.proxy_config.server:
                 launch_options['args'].append(f'--proxy-server={self.proxy_config.server}')
@@ -309,7 +336,9 @@ class PyppeteerCrawler(ABC):
         无头浏览器采集
         """
         try:
-            await self.init_browser(headless=True)
+            browser_ok = await self.init_browser(headless=True)
+            if not browser_ok or not self.page:
+                return CrawlResult(success=False, error_message='浏览器初始化失败')
             html = await self.navigate(url, kwargs.get('wait_selector'))
             
             if html:
@@ -328,7 +357,9 @@ class PyppeteerCrawler(ABC):
         """
         try:
             fingerprint = BrowserFingerprint.random_fingerprint()
-            await self.init_browser(headless=True, fingerprint=fingerprint)
+            browser_ok = await self.init_browser(headless=True, fingerprint=fingerprint)
+            if not browser_ok or not self.page:
+                return CrawlResult(success=False, error_message='浏览器初始化失败')
             
             if self.proxy_config.enabled:
                 if self.proxy_config.username:

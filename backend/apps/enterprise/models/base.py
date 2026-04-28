@@ -70,8 +70,6 @@ class Enterprise(models.Model):
         verbose_name_plural = verbose_name
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['name']),
-            models.Index(fields=['credit_code']),
             models.Index(fields=['province', 'city']),
         ]
 

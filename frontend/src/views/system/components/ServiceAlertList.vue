@@ -1,4 +1,4 @@
-<template>
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<template>
   <div class="alert-list">
     <div class="alert-header">
       <h3>告警列表</h3>
@@ -32,7 +32,7 @@
       <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip />
       <el-table-column prop="created_at" label="创建时间" width="160">
         <template #default="{ row }">
-          {{ formatTime(row.created_at) }}
+          {{ formatDateTime(row.created_at) }}
         </template>
       </el-table-column>
       <el-table-column label="操作" width="200" fixed="right">
@@ -99,13 +99,13 @@
             {{ currentAlert.triggered_by }}
           </el-descriptions-item>
           <el-descriptions-item label="创建时间">
-            {{ formatTime(currentAlert.created_at) }}
+            {{ formatDateTime(currentAlert.created_at) }}
           </el-descriptions-item>
           <el-descriptions-item v-if="currentAlert.notified_at" label="通知时间">
-            {{ formatTime(currentAlert.notified_at) }}
+            {{ formatDateTime(currentAlert.notified_at) }}
           </el-descriptions-item>
           <el-descriptions-item v-if="currentAlert.resolved_at" label="解决时间">
-            {{ formatTime(currentAlert.resolved_at) }}
+            {{ formatDateTime(currentAlert.resolved_at) }}
           </el-descriptions-item>
         </el-descriptions>
 
@@ -130,15 +130,12 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getAlerts, resolveAlert, resolveAllAlerts, sendAlertNotification } from '@/api/monitor'
+import { parseListResponse } from '@/utils/response-parser'
+import { formatDateTime } from '@/utils/date'
 
 const alerts = ref([])
 const showDetail = ref(false)
 const currentAlert = ref(null)
-
-const formatTime = (time) => {
-  if (!time) return ''
-  return new Date(time).toLocaleString('zh-CN')
-}
 
 const getLevelType = (level) => {
   const typeMap = {
@@ -163,7 +160,8 @@ const getStatusTagType = (status) => {
 const fetchAlerts = async () => {
   try {
     const res = await getAlerts({ days: 7 })
-    alerts.value = res.results || res || []
+    const { list } = parseListResponse(res)
+    alerts.value = list
   } catch (error) {
     console.error('获取告警列表失败:', error)
   }
@@ -248,7 +246,7 @@ onMounted(() => {
 
 .alert-detail {
   .no-actions {
-    color: #909399;
+    color: #64748B;
     text-align: center;
     padding: 20px;
   }

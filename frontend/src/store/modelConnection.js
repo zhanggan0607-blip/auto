@@ -6,6 +6,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { modelApi } from '@/api/model'
+import { useUserStore } from '@/store/user'
 
 const CHECK_INTERVAL = 30000
 const INITIAL_RETRY_DELAY = 5000
@@ -13,6 +14,7 @@ const MAX_RETRY_DELAY = 60000
 const CONNECTION_TIMEOUT = 10000
 const IDLE_TIMEOUT = 30 * 60 * 1000
 const MAX_CONSECUTIVE_FAILURES = 3
+const AUTH_FAILURE_COOLDOWN = 30000
 
 export const useModelConnectionStore = defineStore('modelConnection', () => {
   /** @type {import('vue').Ref<boolean>} 是否正在连接 */
@@ -61,6 +63,8 @@ export const useModelConnectionStore = defineStore('modelConnection', () => {
     modelCount: 0
   })
 
+  let lastAuthFailureTime = 0
+
   const statusText = computed(() => {
     const statusMap = {
       disconnected: '未连接',
@@ -106,6 +110,9 @@ export const useModelConnectionStore = defineStore('modelConnection', () => {
       return true
     } catch (error) {
       console.error('获取Agent配置失败:', error)
+      if (error?.response?.status === 401 || error?.response?.status === 429) {
+        lastAuthFailureTime = Date.now()
+      }
       return false
     }
   }
@@ -120,7 +127,13 @@ export const useModelConnectionStore = defineStore('modelConnection', () => {
     const timeoutId = setTimeout(() => controller.abort(), CONNECTION_TIMEOUT)
 
     try {
-      const res = await modelApi.testConnection(config.chat_model_id, null)
+      const providerId = config.chat_provider_id || config.provider_id
+      const modelId = config.chat_model_id || config.model_id
+      if (!providerId || !modelId) {
+        console.warn('testModelConnection: 缺少 provider_id 或 model_id', config)
+        return false
+      }
+      const res = await modelApi.testConnection(providerId, modelId)
       clearTimeout(timeoutId)
       if (res.data?.status === 'success' || res.data?.connected) {
         return true
@@ -169,6 +182,17 @@ export const useModelConnectionStore = defineStore('modelConnection', () => {
    */
   async function autoConnect() {
     if (isConnecting.value) {
+      return false
+    }
+
+    const userStore = useUserStore()
+    if (!userStore.isLoggedIn) {
+      connectionStatus.value = 'disconnected'
+      statusMessage.value = ''
+      return false
+    }
+
+    if (lastAuthFailureTime && Date.now() - lastAuthFailureTime < AUTH_FAILURE_COOLDOWN) {
       return false
     }
 
@@ -244,7 +268,20 @@ export const useModelConnectionStore = defineStore('modelConnection', () => {
       clearTimeout(retryTimer)
     }
 
+    const userStore = useUserStore()
+    if (!userStore.isLoggedIn) {
+      connectionStatus.value = 'disconnected'
+      statusMessage.value = ''
+      return
+    }
+
     retryTimer = setTimeout(() => {
+      const userStore = useUserStore()
+      if (!userStore.isLoggedIn) {
+        connectionStatus.value = 'disconnected'
+        statusMessage.value = ''
+        return
+      }
       autoConnect()
     }, retryDelay.value)
 
@@ -277,6 +314,12 @@ export const useModelConnectionStore = defineStore('modelConnection', () => {
    * @returns {Promise<boolean>}
    */
   async function checkConnectionHealth() {
+    const userStore = useUserStore()
+    if (!userStore.isLoggedIn) {
+      stopHealthCheck()
+      return false
+    }
+
     try {
       const res = await modelApi.getOllamaStatus()
       const isOllamaConnected = res.data?.status === 'success' || res.data?.connected

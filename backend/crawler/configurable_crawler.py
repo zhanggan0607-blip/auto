@@ -1,5 +1,9 @@
 """
 爬虫模块 - 配置化爬虫
+
+.. deprecated::
+    请使用 `common.crawler.common_crawler.CommonCrawler` 替代
+    此模块将在未来版本中移除
 """
 import re
 import logging

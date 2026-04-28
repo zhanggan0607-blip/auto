@@ -75,7 +75,7 @@ class OneClickAutomationService:
         self._tasks: Dict[str, AutomationTask] = {}
         self._running = False
 
-    async def start_automation(
+    def start_automation(
         self,
         enterprise_id: int,
         website_ids: List[int] = None,
@@ -94,6 +94,8 @@ class OneClickAutomationService:
         Returns:
             dict: 任务信息
         """
+        import threading
+
         task_id = str(uuid.uuid4())
 
         automation_config = AutomationConfig(
@@ -114,7 +116,16 @@ class OneClickAutomationService:
 
         self._tasks[task_id] = task
 
-        asyncio.create_task(self._run_automation(task))
+        def run_async_automation():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(self._run_automation(task))
+            finally:
+                loop.close()
+
+        thread = threading.Thread(target=run_async_automation, daemon=True)
+        thread.start()
 
         return {
             'task_id': task_id,
@@ -257,27 +268,15 @@ class OneClickAutomationService:
         website_code = getattr(website, 'code', '') or ''
         website_type = getattr(website, 'website_type', '') or ''
 
-        known_gov_sources = {
-            'china_gov': 'government_tender_collector',
-            'shanghai_gov': 'government_tender_collector',
-            'ccgp': 'government_tender_collector',
-            'zbtb': 'government_tender_collector',
-        }
+        from crawler.crawl_source_registry import crawl_source_registry
 
-        if website_code in known_gov_sources or website_type == 'government':
-            skill_name = known_gov_sources.get(website_code, 'government_tender_collector')
-
-            source_mapping = {
-                'china_gov': 'china_gov',
-                'shanghai_gov': 'shanghai_gov',
-                'ccgp': 'china_gov',
-                'zbtb': 'china_gov',
-            }
+        if crawl_source_registry.is_registered(website_code) or website_type == 'government':
+            source = crawl_source_registry.resolve_source(website_code)
 
             try:
                 result = await skill_registry.execute_skill(
-                    skill_name,
-                    source=source_mapping.get(website_code, 'china_gov'),
+                    'government_tender_collector',
+                    source=source,
                     keywords=keywords,
                     notice_types=['gkzb', 'jzxcs', 'jzxtp', 'xjcg'],
                     page=1,
@@ -299,7 +298,7 @@ class OneClickAutomationService:
 
             try:
                 crawler = ConfigurableCrawler(website)
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 results = await loop.run_in_executor(None, lambda: crawler.crawl(keywords=keywords))
                 return results
             except Exception as e:

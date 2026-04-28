@@ -1,76 +1,82 @@
 """
 中间件模块
 """
+import re
+import threading
 import time
-import logging
-import json
+import uuid
 from django.utils.deprecation import MiddlewareMixin
 
-logger = logging.getLogger(__name__)
+_thread_local = threading.local()
+
+API_VERSION_PATTERN = re.compile(r'^/api/(v\d+)/')
+API_VERSION_HEADER = 'HTTP_ACCEPT'
+API_VERSION_HEADER_PATTERN = re.compile(r'application/vnd\.bid-auto\.(v\d+)\+json')
+CURRENT_API_VERSION = 'v1'
+SUPPORTED_VERSIONS = ['v1']
+
+
+class ApiVersionMiddleware(MiddlewareMixin):
+    def process_request(self, request):
+        request.api_version = self._resolve_version(request)
+
+    def process_response(self, request, response):
+        if hasattr(request, 'api_version'):
+            response['X-API-Version'] = request.api_version
+        return response
+
+    def _resolve_version(self, request):
+        path_match = API_VERSION_PATTERN.match(request.path)
+        if path_match:
+            version = path_match.group(1)
+            if version in SUPPORTED_VERSIONS:
+                return version
+            return CURRENT_API_VERSION
+
+        accept = request.META.get(API_VERSION_HEADER, '')
+        header_match = API_VERSION_HEADER_PATTERN.search(accept)
+        if header_match:
+            version = header_match.group(1)
+            if version in SUPPORTED_VERSIONS:
+                return version
+
+        return CURRENT_API_VERSION
+
+
+class TraceIdMiddleware(MiddlewareMixin):
+    """
+    追踪ID中间件
+    为每个请求生成唯一追踪ID，便于日志关联
+    """
+
+    def process_request(self, request):
+        trace_id = request.META.get('HTTP_X_TRACE_ID')
+        if not trace_id:
+            trace_id = str(uuid.uuid4())[:16]
+        request.trace_id = trace_id
+        _thread_local.request = request
+
+    def process_response(self, request, response):
+        if hasattr(request, 'trace_id'):
+            response['X-Trace-Id'] = request.trace_id
+        if hasattr(_thread_local, 'request'):
+            try:
+                del _thread_local.request
+            except Exception:
+                pass
+        return response
 
 
 class RequestLoggingMiddleware(MiddlewareMixin):
     """
     请求日志中间件
-    增强版：支持敏感数据深度过滤、API审计
+    轻量版：仅记录请求信息，敏感字段过滤由 logging_config 处理
     """
 
-    SENSITIVE_FIELDS = [
-        'password', 'oldPassword', 'newPassword', 'confirmPassword',
-        'token', 'accessToken', 'refreshToken', 'apiKey', 'secretKey',
-        'secret', 'creditCode', 'bankAccount', 'idCard', 'phone',
-        'mobile', 'privateKey', 'authorization'
-    ]
-
-    SENSITIVE_PATHS = [
-        '/api/v1/auth/login',
-        '/api/v1/auth/register',
-        '/api/v1/users/password',
-    ]
-
     def process_request(self, request):
-        """
-        记录请求开始时间
-        """
         request.start_time = time.time()
 
-        if request.method in ['POST', 'PUT', 'PATCH']:
-            try:
-                body = json.loads(request.body.decode('utf-8'))
-                request._body_json = self._filter_sensitive_fields(body)
-            except Exception:
-                request._body_json = {}
-
-    def _filter_sensitive_fields(self, data):
-        """
-        深度过滤敏感字段
-
-        Args:
-            data: 原始数据字典
-
-        Returns:
-            dict: 过滤后的数据
-        """
-        if not isinstance(data, dict):
-            return data
-
-        result = {}
-        for key, value in data.items():
-            key_lower = key.lower()
-            if any(sf.lower() in key_lower for sf in self.SENSITIVE_FIELDS):
-                result[key] = '***FILTERED***'
-            elif isinstance(value, dict):
-                result[key] = self._filter_sensitive_fields(value)
-            elif isinstance(value, list) and value and isinstance(value[0], dict):
-                result[key] = [self._filter_sensitive_fields(item) for item in value]
-            else:
-                result[key] = value
-        return result
-
     def process_response(self, request, response):
-        """
-        记录请求日志
-        """
         if hasattr(request, 'start_time'):
             duration = time.time() - request.start_time
         else:
@@ -82,7 +88,8 @@ class RequestLoggingMiddleware(MiddlewareMixin):
             user_id = request.user.id
             username = request.user.username
 
-        ip_address = self.get_client_ip(request)
+        import logging
+        logger = logging.getLogger('api_request')
 
         log_data = {
             'method': request.method,
@@ -91,53 +98,14 @@ class RequestLoggingMiddleware(MiddlewareMixin):
             'duration': f'{duration:.3f}s',
             'user_id': user_id,
             'username': username,
-            'ip': ip_address,
         }
 
-        if request.method in ['POST', 'PUT', 'PATCH'] and hasattr(request, '_body_json'):
-            log_data['body'] = request._body_json
-
-        try:
-            from utils.audit_logger import audit_logger, AuditEventType, AuditRiskLevel
-
-            if request.method in ['POST', 'PUT', 'PATCH', 'DELETE']:
-                risk_level = AuditRiskLevel.WARNING if response.status_code >= 400 else AuditRiskLevel.INFO
-                audit_logger.log(
-                    event_type=AuditEventType.API_ACCESS,
-                    request=request,
-                    action=f'{request.method} {request.path}',
-                    status='success' if response.status_code < 400 else 'failed',
-                    risk_level=risk_level,
-                    metadata={'duration': duration, 'status_code': response.status_code}
-                )
-        except ImportError:
-            pass
+        if hasattr(request, 'trace_id'):
+            log_data['trace_id'] = request.trace_id
 
         if response.status_code >= 400:
-            logger.warning(f"API请求失败: {json.dumps(log_data, ensure_ascii=False)}")
+            logger.warning(f"API请求失败: {log_data}")
         else:
-            logger.info(f"API请求: {json.dumps(log_data, ensure_ascii=False)}")
+            logger.info(f"API请求: {log_data}")
 
-        return response
-
-    def get_client_ip(self, request):
-        """
-        获取客户端IP
-        """
-        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        if x_forwarded_for:
-            return x_forwarded_for.split(',')[0].strip()
-        return request.META.get('REMOTE_ADDR', '')
-
-
-class CorsMiddleware(MiddlewareMixin):
-    """
-    CORS中间件 - 补充处理
-    """
-
-    def process_response(self, request, response):
-        """
-        添加CORS头
-        """
-        response['Access-Control-Allow-Credentials'] = 'true'
         return response

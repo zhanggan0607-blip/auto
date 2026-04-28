@@ -12,6 +12,15 @@ from rest_framework.views import APIView
 from django.utils import timezone
 from django.http import StreamingHttpResponse
 
+
+def _run_async(coro):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
 from apps.openclaw.models import (
     LLMProvider, LLMModel, AgentModelConfig, LLMUsageLog,
     AutomationConfig, AIDecisionConfig, AutoMatchConfig,
@@ -20,12 +29,13 @@ from apps.openclaw.models import (
 from apps.openclaw.workflow_models import WorkflowStage
 from apps.openclaw.serializers import (
     LLMProviderSerializer, LLMModelSerializer, AgentModelConfigSerializer,
+    LLMUsageLogSerializer,
     WorkflowStageSerializer, AutomationConfigSerializer,
     AIDecisionConfigSerializer, AutoMatchConfigSerializer,
     DocumentReviewConfigSerializer, RiskControlConfigSerializer,
     CrawlConfigSerializer, NotificationConfigSerializer
 )
-from core.viewsets import AuthenticatedModelViewSet, APIResponseMixin
+from common.views.base import BaseViewSet, APIResponseMixin, AuthenticatedModelViewSet
 from utils.responses import UnifiedResponse
 
 
@@ -89,12 +99,23 @@ class LLMProviderViewSet(APIResponseMixin, viewsets.ModelViewSet):
         provider_id = request.data.get('provider_id')
         model_id = request.data.get('model_id')
 
+        if not provider_id:
+            return UnifiedResponse.error(message='缺少参数: provider_id', status_code=status.HTTP_400_BAD_REQUEST)
+        if not model_id:
+            return UnifiedResponse.error(message='缺少参数: model_id，请指定要测试的模型', status_code=status.HTTP_400_BAD_REQUEST)
+
         try:
-            import requests
+            import requests as http_requests
             provider = LLMProvider.objects.get(id=provider_id)
 
+            if not provider.is_active:
+                return UnifiedResponse.error(message=f'提供商 {provider.name} 已禁用，请先启用', status_code=status.HTTP_400_BAD_REQUEST)
+
             if not provider.api_key and provider.provider_type not in ('ollama',):
-                return UnifiedResponse.error(message='API Key未配置', status_code=status.HTTP_400_BAD_REQUEST)
+                return UnifiedResponse.error(
+                    message=f'提供商 {provider.name} 的 API Key 未配置',
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
 
             if provider.provider_type == 'zhipu':
                 url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
@@ -108,11 +129,12 @@ class LLMProviderViewSet(APIResponseMixin, viewsets.ModelViewSet):
                     'Authorization': f'Bearer {provider.api_key}'
                 }
             elif provider.provider_type == 'qwen':
-                url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
+                url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
                 payload = {
                     'model': model_id,
-                    'input': {'messages': [{'role': 'user', 'content': "你好，请回复'连接成功'"}]},
-                    'parameters': {'temperature': 0.7, 'max_tokens': 100}
+                    'messages': [{'role': 'user', 'content': "你好，请回复'连接成功'"}],
+                    'temperature': 0.7,
+                    'max_tokens': 100
                 }
                 headers = {
                     'Authorization': f'Bearer {provider.api_key}',
@@ -130,13 +152,14 @@ class LLMProviderViewSet(APIResponseMixin, viewsets.ModelViewSet):
                     'Authorization': f'Bearer {provider.api_key}'
                 }
             elif provider.provider_type == 'ollama':
-                url = f"{provider.base_url}/api/chat"
+                url = f"{provider.base_url or 'http://localhost:11434'}/api/chat"
                 payload = {
                     'model': model_id,
                     'messages': [{'role': 'user', 'content': "你好，请回复'连接成功'"}],
-                    'temperature': 0.7
+                    'temperature': 0.7,
+                    'stream': False
                 }
-                headers = {}
+                headers = {'Content-Type': 'application/json'}
             else:
                 url = f"{provider.base_url}/chat/completions"
                 payload = {
@@ -149,7 +172,8 @@ class LLMProviderViewSet(APIResponseMixin, viewsets.ModelViewSet):
                     'Authorization': f'Bearer {provider.api_key}'
                 }
 
-            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            timeout = 10 if provider.provider_type == 'ollama' else 30
+            response = http_requests.post(url, json=payload, headers=headers, timeout=timeout)
             response.raise_for_status()
             result = response.json()
 
@@ -158,16 +182,47 @@ class LLMProviderViewSet(APIResponseMixin, viewsets.ModelViewSet):
                 content = result['choices'][0].get('message', {}).get('content', '')
             elif 'output' in result:
                 content = result['output'].get('choices', [{}])[0].get('text', '')
+            elif 'message' in result and isinstance(result.get('message'), dict):
+                content = result['message'].get('content', '')
 
             return UnifiedResponse.success(
                 message='连接成功',
                 data={'response': content[:100] if content else str(result)[:100]}
             )
         except LLMProvider.DoesNotExist:
-            return UnifiedResponse.error(message='提供商不存在', status_code=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
+            return UnifiedResponse.error(message=f'提供商不存在 (id={provider_id})', status_code=status.HTTP_404_NOT_FOUND)
+        except http_requests.ConnectionError:
+            provider_name = '未知'
+            try:
+                p = LLMProvider.objects.get(id=provider_id)
+                provider_name = p.name
+            except LLMProvider.DoesNotExist:
+                pass
             return UnifiedResponse.error(
-                message=f'连接失败: {str(e)}',
+                message=f'无法连接到 {provider_name} 服务，请检查服务是否启动及网络配置',
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+        except http_requests.Timeout:
+            return UnifiedResponse.error(
+                message='连接超时，请检查服务是否正常运行',
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+        except http_requests.HTTPError as e:
+            status_code_resp = e.response.status_code if e.response else 0
+            detail = ''
+            try:
+                err_body = e.response.json()
+                detail = err_body.get('error', {}).get('message', '') or err_body.get('message', '')
+            except Exception:
+                detail = e.response.text[:200] if e.response else ''
+            return UnifiedResponse.error(
+                message=f'API返回错误 ({status_code_resp}): {detail or str(e)}',
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f'test_connection 异常: provider_id={provider_id}, model_id={model_id}, error={e}')
+            return UnifiedResponse.error(
+                message=f'连接测试失败: {str(e)}',
                 status_code=status.HTTP_400_BAD_REQUEST
             )
 
@@ -208,11 +263,22 @@ class LLMProviderViewSet(APIResponseMixin, viewsets.ModelViewSet):
                 models = data.get('models', [])
                 return UnifiedResponse.success(data={
                     'models': models,
-                    'version': data.get('version', 'unknown')
+                    'version': data.get('version', 'unknown'),
+                    'connected': True
                 })
-            return UnifiedResponse.error(message='获取模型列表失败')
+            return UnifiedResponse.success(data={
+                'models': [],
+                'version': '',
+                'connected': False,
+                'error': 'Ollama 服务未响应'
+            })
         except Exception as e:
-            return UnifiedResponse.error(message=f'连接失败: {str(e)}')
+            return UnifiedResponse.success(data={
+                'models': [],
+                'version': '',
+                'connected': False,
+                'error': str(e)
+            })
 
     @action(detail=False, methods=['post'])
     def sync_ollama_models(self, request):
@@ -294,7 +360,7 @@ class LLMProviderViewSet(APIResponseMixin, viewsets.ModelViewSet):
             try:
                 from services.unified_llm_service import unified_llm_service
                 start_time = timezone.now()
-                result = asyncio.run(unified_llm_service.chat(
+                result = _run_async(unified_llm_service.chat(
                     message=test_message,
                     provider_id=provider.id,
                     model_id=provider.default_model,
@@ -419,92 +485,7 @@ class AgentModelConfigViewSet(APIResponseMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(updated, many=True)
         return UnifiedResponse.success(data=serializer.data, message=f'成功更新 {len(updated)} 条配置')
 
-
-class WorkflowStageViewSet(APIResponseMixin, viewsets.ModelViewSet):
-    """
-    工作流阶段管理
-    """
-    queryset = WorkflowStage.objects.all()
-    serializer_class = WorkflowStageSerializer
-    permission_classes = [IsAuthenticated]
-
-    @action(detail=True, methods=['post'])
-    def retry(self, request, pk=None):
-        """
-        重试阶段
-        """
-        stage = self.get_object()
-        stage.retry_count += 1
-        stage.status = 'pending'
-        stage.error_message = None
-        stage.save()
-
-        return UnifiedResponse.success(message='阶段已重置，等待重新执行')
-
-    @action(detail=True, methods=['post'])
-    def skip(self, request, pk=None):
-        """
-        跳过阶段
-        """
-        stage = self.get_object()
-        stage.status = 'skipped'
-        stage.save()
-
-        return UnifiedResponse.success(message='阶段已跳过')
-
-
-class LLMUsageLogViewSet(APIResponseMixin, viewsets.ReadOnlyModelViewSet):
-    """
-    大模型使用日志（只读）
-    """
-    queryset = LLMUsageLog.objects.all()
-    serializer_class = LLMModelSerializer
-    permission_classes = [IsAuthenticated]
-    filterset_fields = ['provider', 'agent_type', 'success']
-
-    @action(detail=False, methods=['get'])
-    def statistics(self, request):
-        """
-        使用统计
-        """
-        from django.db.models import Sum, Count, Avg
-
-        start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
-
-        queryset = LLMUsageLog.objects.all()
-
-        if start_date:
-            queryset = queryset.filter(created_at__gte=start_date)
-        if end_date:
-            queryset = queryset.filter(created_at__lte=end_date)
-
-        stats = queryset.aggregate(
-            total_calls=Count('id'),
-            total_tokens=Sum('total_tokens'),
-            total_cost=Sum('cost'),
-            avg_latency=Avg('latency'),
-            success_rate=Count('id', filter=models.Q(success=True)) * 100.0 / Count('id')
-        )
-
-        by_provider = queryset.values('provider__name').annotate(
-            calls=Count('id'),
-            tokens=Sum('total_tokens')
-        ).order_by('-calls')
-
-        by_agent = queryset.values('agent_type').annotate(
-            calls=Count('id'),
-            tokens=Sum('total_tokens')
-        ).order_by('-calls')
-
-        return UnifiedResponse.success(data={
-            'overall': stats,
-            'by_provider': list(by_provider),
-            'by_agent': list(by_agent)
-        })
-
-
-class AutomationConfigViewSet(AuthenticatedModelViewSet):
+class AutomationConfigViewSet(BaseViewSet):
     """
     全自动化配置管理
     支持配置AI决策参数、自动匹配参数、模型选择等
@@ -881,7 +862,7 @@ class AIPlaygroundViewSet(APIResponseMixin, viewsets.ViewSet):
         try:
             from services.unified_llm_service import unified_llm_service
 
-            result = asyncio.run(unified_llm_service.chat(
+            result = _run_async(unified_llm_service.chat(
                 message=message,
                 provider_id=provider_id,
                 model_id=model_id,
@@ -959,9 +940,9 @@ class AIPlaygroundViewSet(APIResponseMixin, viewsets.ViewSet):
                                     continue
                                 accumulated_content += item
                                 yield f"event: message\ndata: {json.dumps({'content': item})}\n\n"
-                            yield f"event: done\ndata: {json.dumps({'content': accumulated_content})}\n\n"
+                            yield f"event: done\ndata: {json.dumps({'content': ''})}\n\n"
                         else:
-                            result = asyncio.run(unified_llm_service.chat(
+                            result = _run_async(unified_llm_service.chat(
                                 message=message,
                                 provider_id=provider_id,
                                 model_id=model_id,
@@ -1178,192 +1159,3 @@ class SystemModelsView(APIView):
         except Exception as e:
             logger.error(f"获取模型列表失败: {str(e)}")
             return UnifiedResponse.error(message=f"获取模型列表失败: {str(e)}")
-
-
-class ErrorKnowledgeViewSet(APIResponseMixin, viewsets.ViewSet):
-    """
-    错误知识库视图集
-    提供错误统计、高频错误、最近失败等查询接口
-    """
-    permission_classes = [IsAuthenticated]
-
-    def list(self, request):
-        """
-        获取错误知识库摘要
-        """
-        try:
-            from services.failure_knowledge_base import failure_knowledge_base
-
-            summary = failure_knowledge_base.get_knowledge_summary()
-            return UnifiedResponse.success(data=summary)
-        except Exception as e:
-            logger.error(f"获取知识库摘要失败: {str(e)}")
-            return UnifiedResponse.error(message=f"获取知识库摘要失败: {str(e)}")
-
-    def stats(self, request):
-        """
-        获取知识库统计信息
-        """
-        try:
-            from services.failure_knowledge_base import failure_knowledge_base
-
-            summary = failure_knowledge_base.get_knowledge_summary()
-            return UnifiedResponse.success(data=summary)
-        except Exception as e:
-            logger.error(f"获取统计失败: {str(e)}")
-            return UnifiedResponse.error(message=f"获取统计失败: {str(e)}")
-
-    def frequent(self, request):
-        """
-        获取高频错误列表
-        """
-        try:
-            from services.failure_knowledge_base import failure_knowledge_base
-
-            top_n = int(request.query_params.get('top_n', 10))
-            frequent = failure_knowledge_base.get_frequent_errors(top_n=top_n)
-            return UnifiedResponse.success(data=frequent)
-        except Exception as e:
-            logger.error(f"获取高频错误失败: {str(e)}")
-            return UnifiedResponse.error(message=f"获取高频错误失败: {str(e)}")
-
-    def recent(self, request):
-        """
-        获取最近失败记录
-        """
-        try:
-            from services.failure_knowledge_base import failure_knowledge_base
-
-            limit = int(request.query_params.get('limit', 20))
-            only_unsolved = request.query_params.get('unsolved', 'false').lower() == 'true'
-            recent = failure_knowledge_base.get_recent_failures(limit=limit, only_unsolved=only_unsolved)
-            return UnifiedResponse.success(data=recent)
-        except Exception as e:
-            logger.error(f"获取最近失败失败: {str(e)}")
-            return UnifiedResponse.error(message=f"获取最近失败失败: {str(e)}")
-
-    def trend(self, request):
-        """
-        获取错误趋势
-        """
-        try:
-            from services.failure_knowledge_base import failure_knowledge_base
-
-            days = int(request.query_params.get('days', 7))
-            trend = failure_knowledge_base.get_error_trend(days=days)
-            return UnifiedResponse.success(data=trend)
-        except Exception as e:
-            logger.error(f"获取错误趋势失败: {str(e)}")
-            return UnifiedResponse.error(message=f"获取错误趋势失败: {str(e)}")
-
-    def suggestions(self, request):
-        """
-        获取优化建议
-        """
-        try:
-            from services.failure_knowledge_base import failure_knowledge_base
-
-            suggestions = failure_knowledge_base.suggest_improvements()
-            return UnifiedResponse.success(data=suggestions)
-        except Exception as e:
-            logger.error(f"获取优化建议失败: {str(e)}")
-            return UnifiedResponse.error(message=f"获取优化建议失败: {str(e)}")
-
-
-class AutoOptimizerViewSet(APIResponseMixin, viewsets.ViewSet):
-    """
-    自动优化引擎视图集
-    提供系统健康检查、优化参数、优化建议等接口
-    """
-    permission_classes = [IsAuthenticated]
-
-    def health(self, request):
-        """
-        获取系统健康状态
-        """
-        try:
-            from services.auto_optimizer import auto_optimizer
-
-            result = auto_optimizer.check_system_health()
-            return UnifiedResponse.success(data={
-                'status': result.status.value,
-                'services': result.services,
-                'issues': result.issues,
-                'recommendations': result.recommendations,
-                'checked_at': result.checked_at
-            })
-        except Exception as e:
-            logger.error(f"获取健康状态失败: {str(e)}")
-            return UnifiedResponse.error(message=f"获取健康状态失败: {str(e)}")
-
-    def suggestions(self, request):
-        """
-        获取优化建议
-        """
-        try:
-            from services.auto_optimizer import auto_optimizer
-
-            suggestions = auto_optimizer.get_optimization_suggestions()
-            return UnifiedResponse.success(data=[
-                {
-                    'priority': s.priority,
-                    'category': s.category,
-                    'issue': s.issue,
-                    'current_value': s.current_value,
-                    'suggested_value': s.suggested_value,
-                    'reason': s.reason,
-                    'expected_improvement': s.expected_improvement
-                }
-                for s in suggestions
-            ])
-        except Exception as e:
-            logger.error(f"获取优化建议失败: {str(e)}")
-            return UnifiedResponse.error(message=f"获取优化建议失败: {str(e)}")
-
-    def params(self, request):
-        """
-        获取优化后的参数
-        """
-        try:
-            from services.auto_optimizer import auto_optimizer
-
-            stage = request.query_params.get('stage', 'collect')
-            params = auto_optimizer.get_optimized_params(stage)
-            return UnifiedResponse.success(data=params)
-        except Exception as e:
-            logger.error(f"获取优化参数失败: {str(e)}")
-            return UnifiedResponse.error(message=f"获取优化参数失败: {str(e)}")
-
-    def trends(self, request):
-        """
-        获取错误趋势
-        """
-        try:
-            from services.auto_optimizer import auto_optimizer
-
-            days = int(request.query_params.get('days', 7))
-            trends = auto_optimizer.get_error_trends(days=days)
-            return UnifiedResponse.success(data=trends)
-        except Exception as e:
-            logger.error(f"获取错误趋势失败: {str(e)}")
-            return UnifiedResponse.error(message=f"获取错误趋势失败: {str(e)}")
-
-    def strategies(self, request):
-        """
-        获取各阶段优化策略
-        """
-        try:
-            from services.auto_optimizer import auto_optimizer
-
-            strategies = {}
-            for stage in ['collect', 'match', 'generate', 'review', 'upload', 'track']:
-                config = auto_optimizer.get_stage_config(stage)
-                strategies[stage] = {
-                    'max_retries': config.max_retries,
-                    'timeout_seconds': config.timeout_seconds,
-                    'strategy': config.strategy.value
-                }
-            return UnifiedResponse.success(data=strategies)
-        except Exception as e:
-            logger.error(f"获取优化策略失败: {str(e)}")
-            return UnifiedResponse.error(message=f"获取优化策略失败: {str(e)}")

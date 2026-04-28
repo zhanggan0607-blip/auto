@@ -2,6 +2,7 @@
 自动化任务调度
 定时执行一键投标任务
 """
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Any
@@ -64,13 +65,17 @@ def scheduled_bid_automation():
 
                 keywords = enterprise.auto_bid_keywords or []
 
-                import asyncio
-                result = asyncio.run(one_click_automation_service.start_automation(
-                    enterprise_id=enterprise.id,
-                    website_ids=website_ids,
-                    keywords=keywords,
-                    config=config
-                ))
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    result = loop.run_until_complete(one_click_automation_service.start_automation(
+                        enterprise_id=enterprise.id,
+                        website_ids=website_ids,
+                        keywords=keywords,
+                        config=config
+                    ))
+                finally:
+                    loop.close()
 
                 logger.info(f"企业 {enterprise.name} 自动投标任务已启动: {result}")
 
@@ -89,10 +94,15 @@ def check_bid_results():
     """
     定时检查投标结果
     每天自动查询已投标项目的中标结果
+
+    实现逻辑：
+    1. 从BidProjectTracking获取所有正在跟踪的项目
+    2. 调用crawler.tasks中的_check_single_bid_result进行真正的网站爬取
+    3. 根据结果更新跟踪状态并发送钉钉通知
     """
-    from apps.bids.models import BidRecord, BidResult
-    from apps.openclaw.workflow_models import BidProjectTracking
+    from apps.crawler.models import BidProjectTracking
     from services.dingtalk_service import bid_result_notification_service
+    from crawler.tasks import _check_single_bid_result as crawler_check_bid_result
 
     logger.info("开始执行投标结果检查任务")
 
@@ -101,21 +111,26 @@ def check_bid_results():
             tracking_status='tracking'
         )
 
+        checked_count = 0
+        notified_count = 0
+
         for tracking in tracking_projects:
             try:
-                result = _check_single_bid_result(tracking)
+                checked_count += 1
+                result = crawler_check_bid_result(tracking)
 
                 if result:
-                    tracking.tracking_status = result['status']
+                    tracking.tracking_status = result.get('status', 'tracking')
                     tracking.winner_name = result.get('winner_name')
                     tracking.winner_amount = result.get('winner_amount')
                     tracking.our_rank = result.get('our_rank')
-                    tracking.result_announce_date = result.get('announce_date')
+                    if result.get('announce_date'):
+                        tracking.result_announce_date = result.get('announce_date')
                     tracking.last_checked_at = timezone.now()
                     tracking.check_count += 1
                     tracking.save()
 
-                    if result['status'] == 'won':
+                    if result.get('status') == 'won' and not tracking.notification_sent:
                         bid_result_notification_service.notify_bid_win(
                             tender_title=tracking.tender_title,
                             tender_url=tracking.tender_url,
@@ -126,8 +141,9 @@ def check_bid_results():
                         tracking.notification_sent = True
                         tracking.notification_sent_at = timezone.now()
                         tracking.save()
+                        notified_count += 1
 
-                    elif result['status'] == 'lost':
+                    elif result.get('status') == 'lost' and not tracking.notification_sent:
                         bid_result_notification_service.notify_bid_lost(
                             tender_title=tracking.tender_title,
                             tender_url=tracking.tender_url,
@@ -139,44 +155,16 @@ def check_bid_results():
                         tracking.notification_sent = True
                         tracking.notification_sent_at = timezone.now()
                         tracking.save()
+                        notified_count += 1
 
             except Exception as e:
                 logger.error(f"检查项目 {tracking.tender_title} 结果失败: {str(e)}")
                 continue
 
-        logger.info("投标结果检查任务执行完成")
+        logger.info(f"投标结果检查任务执行完成: 检查 {checked_count} 个项目，发送 {notified_count} 条通知")
 
     except Exception as e:
         logger.error(f"投标结果检查任务执行失败: {str(e)}")
-
-
-def _check_single_bid_result(tracking) -> Dict[str, Any]:
-    """
-    检查单个投标项目的结果
-    """
-    from apps.bids.models import BidRecord, BidResult
-
-    try:
-        bid_record = BidRecord.objects.filter(
-            tender__title__icontains=tracking.tender_title[:20]
-        ).first()
-
-        if bid_record:
-            bid_result = BidResult.objects.filter(bid_record=bid_record).first()
-
-            if bid_result and bid_result.result_type != 'pending':
-                return {
-                    'status': 'won' if bid_result.result_type == 'win' else 'lost',
-                    'winner_name': bid_result.winner_name,
-                    'winner_amount': bid_result.winner_amount,
-                    'our_rank': bid_result.our_rank,
-                    'announce_date': bid_result.announce_date
-                }
-
-    except Exception as e:
-        logger.warning(f"查询投标结果失败: {str(e)}")
-
-    return None
 
 
 @shared_task(name='automation.cleanup_old_tasks')
@@ -278,18 +266,22 @@ def auto_crawl_websites():
                 if schedule.next_run_at and schedule.next_run_at > timezone.now():
                     continue
 
-                import asyncio
                 from services.one_click_automation import one_click_automation_service
 
-                result = asyncio.run(one_click_automation_service.start_automation(
-                    enterprise_id=schedule.created_by.enterprise.id if hasattr(schedule.created_by, 'enterprise') else None,
-                    website_ids=[schedule.website_template.id],
-                    keywords=schedule.keywords,
-                    config={
-                        'auto_bid_threshold': schedule.match_threshold * 100,
-                        'notification_enabled': True
-                    }
-                ))
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    result = loop.run_until_complete(one_click_automation_service.start_automation(
+                        enterprise_id=schedule.created_by.enterprise.id if hasattr(schedule.created_by, 'enterprise') else None,
+                        website_ids=[schedule.website_template.id],
+                        keywords=schedule.keywords,
+                        config={
+                            'auto_bid_threshold': schedule.match_threshold * 100,
+                            'notification_enabled': True
+                        }
+                    ))
+                finally:
+                    loop.close()
 
                 schedule.last_run_at = timezone.now()
                 schedule.run_count += 1

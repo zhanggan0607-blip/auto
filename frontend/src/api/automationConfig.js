@@ -7,16 +7,8 @@ export const automationConfigApi = {
     return request.get(`${BASE_URL}/automation-config/`, { params })
   },
 
-  get: (id) => {
-    return request.get(`${BASE_URL}/automation-config/${id}/`)
-  },
-
   create: (data) => {
     return request.post(`${BASE_URL}/automation-config/`, data)
-  },
-
-  update: (id, data) => {
-    return request.patch(`${BASE_URL}/automation-config/${id}/`, data)
   },
 
   delete: (id) => {
@@ -65,10 +57,6 @@ export const automationConfigApi = {
     return request.post(`${BASE_URL}/automation-config/${id}/update_notification_config/`, {
       notification_config: data
     })
-  },
-
-  updateAllConfigs: (id, data) => {
-    return request.post(`${BASE_URL}/automation-config/${id}/update_all_configs/`, data)
   },
 
   createWithDefaults: (data) => {

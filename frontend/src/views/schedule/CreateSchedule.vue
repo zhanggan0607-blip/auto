@@ -36,6 +36,8 @@ import { PageHeader } from '@/components'
 import ScheduleForm from '@/components/schedule/ScheduleForm.vue'
 import { crawlerApi } from '@/api/crawler'
 import { tenderApi } from '@/api/tender'
+import { parseListResponse } from '@/utils/response-parser'
+import { useFormDraft } from '@/composables/useFormDraft'
 
 const router = useRouter()
 const scheduleFormRef = ref(null)
@@ -48,6 +50,7 @@ const form = reactive({
   website_template: null,
   crontab: '0 6 * * *',
   crawl_mode: 'incremental',
+  max_pages: 10,
   keywords: [],
   regions: [],
   enterprise_ids: [],
@@ -57,12 +60,15 @@ const form = reactive({
   match_threshold: 0.6
 })
 
+const { clearDraft } = useFormDraft(form, {
+  key: 'schedule:create'
+})
+
 const fetchTemplates = async () => {
   try {
     const res = await crawlerApi.getWebsiteTemplates({ page_size: 100 })
-    if (res.data) {
-      templates.value = res.data.list || res.data.results || res.data || []
-    }
+    const { list } = parseListResponse(res)
+    templates.value = list
   } catch (error) {
     console.error('获取网站模板失败:', error)
     ElMessage.error('获取网站模板失败')
@@ -72,9 +78,8 @@ const fetchTemplates = async () => {
 const fetchKeywords = async () => {
   try {
     const res = await tenderApi.getKeywords({})
-    if (res.data) {
-      keywords.value = res.data.list || res.data.results || res.data || []
-    }
+    const { list } = parseListResponse(res)
+    keywords.value = list
   } catch (error) {
     console.error('获取关键词列表失败:', error)
     ElMessage.error('获取关键词列表失败')
@@ -93,6 +98,7 @@ const handleSubmit = async () => {
       auto_delete_unmatched: true
     }
     await crawlerApi.createCrawlSchedule(submitData)
+    clearDraft()
     ElMessage.success('采集计划创建成功')
     router.push('/schedules')
   } catch (error) {
@@ -113,7 +119,7 @@ onMounted(() => {
 .page-container {
   padding: 16px;
   min-height: calc(100vh - 60px);
-  background-color: #f5f7fa;
+  background-color: #F1F5F9;
 }
 
 .content-card {

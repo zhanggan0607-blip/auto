@@ -33,6 +33,12 @@ class BaseLLMAdapter(ABC):
         获取HTTP会话（延迟初始化，会话复用）
         """
         if self._session is None:
+            import sys
+            venv_site = r'D:\共享文件\AUTO\venv\Lib\site-packages'
+            for p in [venv_site, r'D:\共享文件\AUTO\venv\Lib\site-packages\requests']:
+                if p not in sys.path:
+                    sys.path.insert(0, p)
+
             import requests
             self._session = requests.Session()
             self._session.headers.update({'Content-Type': 'application/json'})
@@ -119,7 +125,7 @@ class BaseLLMAdapter(ABC):
         payload = self.build_payload(model_id, messages, temperature, max_tokens)
         headers = self.get_headers()
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def sync_request():
             session = self.get_session()
@@ -191,9 +197,45 @@ class OllamaAdapter(BaseLLMAdapter):
         temperature: float,
         max_tokens: int
     ) -> dict:
-        return {
+        payload = {
             'model': model_id,
             'messages': messages,
+            'temperature': temperature,
+            'stream': False
+        }
+        return payload
+
+    def build_vision_payload(
+        self,
+        model_id: str,
+        image_base64: str,
+        prompt: str,
+        temperature: float = 0.1,
+        max_tokens: int = 2048
+    ) -> dict:
+        """
+        构建视觉模型的payload
+        适用于 qwen2.5-vl、qwen3-vl 等视觉模型
+        """
+        return {
+            'model': model_id,
+            'messages': [
+                {
+                    'role': 'user',
+                    'content': [
+                        {
+                            'type': 'text',
+                            'text': prompt
+                        },
+                        {
+                            'type': 'image_url',
+                            'image_url': {
+                                'url': f'data:image/jpeg;base64,{image_base64}'
+                            }
+                        }
+                    ]
+                }
+            ],
             'temperature': temperature,
             'stream': False
         }

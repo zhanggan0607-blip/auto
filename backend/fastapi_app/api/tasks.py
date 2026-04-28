@@ -58,17 +58,25 @@ async def create_task(task_data: TaskCreate, background_tasks: BackgroundTasks):
     """
     try:
         from backend.crawler.tasks import (
-            run_crawl_task,
-            sync_enterprise_to_vector,
-            process_bid_document,
-            send_dingtalk_notification,
+            scheduled_crawl_with_match,
+            crawl_china_gov,
+            crawl_shanghai_gov_v2,
+            build_enterprise_vector_index,
+            match_tenders_with_enterprises,
+            check_bid_results,
+            send_daily_summary,
+            auto_match_qualifications,
         )
 
         task_mapping = {
-            "crawl": run_crawl_task,
-            "sync_enterprise": sync_enterprise_to_vector,
-            "process_document": process_bid_document,
-            "send_notification": send_dingtalk_notification,
+            "crawl": scheduled_crawl_with_match,
+            "crawl_china": crawl_china_gov,
+            "crawl_shanghai": crawl_shanghai_gov_v2,
+            "sync_enterprise": build_enterprise_vector_index,
+            "match_tenders": match_tenders_with_enterprises,
+            "check_bids": check_bid_results,
+            "send_notification": send_daily_summary,
+            "auto_match": auto_match_qualifications,
         }
 
         task_func = task_mapping.get(task_data.task_name)
@@ -152,13 +160,15 @@ async def create_batch_tasks(tasks: List[TaskCreate]):
     for task_data in tasks:
         try:
             from backend.crawler.tasks import (
-                run_crawl_task,
-                sync_enterprise_to_vector,
+                scheduled_crawl_with_match,
+                crawl_china_gov,
+                build_enterprise_vector_index,
             )
 
             task_mapping = {
-                "crawl": run_crawl_task,
-                "sync_enterprise": sync_enterprise_to_vector,
+                "crawl": scheduled_crawl_with_match,
+                "crawl_china": crawl_china_gov,
+                "sync_enterprise": build_enterprise_vector_index,
             }
 
             task_func = task_mapping.get(task_data.task_name)

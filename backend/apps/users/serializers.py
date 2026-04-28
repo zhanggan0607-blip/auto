@@ -7,18 +7,9 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 
 from .models import UserProfile, UserLoginLog
+from common.serializers.validators import validate_phone
 
 User = get_user_model()
-
-
-def validate_phone(value):
-    """
-    验证手机号格式
-    """
-    pattern = r'^1[3-9]\d{9}$'
-    if value and not re.match(pattern, value):
-        raise ValidationError('请输入正确的手机号码')
-    return value
 
 
 def validate_email(value):
@@ -54,9 +45,10 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'id', 'username', 'email', 'phone', 'real_name', 
-            'company_name', 'role', 'is_active', 'created_at', 'updated_at'
+            'company_name', 'role', 'is_active', 'is_staff', 'is_superuser',
+            'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'is_staff', 'is_superuser']
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
@@ -266,12 +258,9 @@ class LoginSerializer(serializers.Serializer):
 
 
 class UserLoginLogSerializer(serializers.ModelSerializer):
-    """
-    登录日志序列化器
-    """
     username = serializers.CharField(source='user.username', read_only=True)
     login_ip = serializers.CharField(read_only=True, allow_null=True)
-    
+
     class Meta:
         model = UserLoginLog
         fields = ['id', 'username', 'login_ip', 'login_time', 'login_status']

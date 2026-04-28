@@ -1,7 +1,6 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
-import 'element-plus/dist/index.css'
 import zhCn from 'element-plus/dist/locale/zh-cn.mjs'
 import {
   Upload,
@@ -37,7 +36,10 @@ import {
   Setting,
   Bell,
   User,
-  CirclePlus
+  CirclePlus,
+  SwitchButton,
+  Expand,
+  Fold
 } from '@element-plus/icons-vue'
 
 import App from './App.vue'
@@ -47,22 +49,25 @@ import '@/assets/styles/main.scss'
 
 const app = createApp(App)
 
-app.config.errorHandler = (err, vm, info) => {
-  if (err.message && err.message.includes('ResizeObserver')) {
-    return
-  }
-  console.error('Vue Error:', err, info)
+const isResizeObserverError = (err) => {
+  const msg = err?.message || err?.reason?.message || ''
+  return msg.includes('ResizeObserver')
+}
+
+app.config.errorHandler = (err) => {
+  if (isResizeObserverError(err)) return
+  console.error('Vue Error:', err)
 }
 
 window.addEventListener('error', (event) => {
-  if (event.message && event.message.includes('ResizeObserver')) {
+  if (isResizeObserverError(event)) {
     event.preventDefault()
     return false
   }
 })
 
 window.addEventListener('unhandledrejection', (event) => {
-  if (event.reason && event.reason.message && event.reason.message.includes('ResizeObserver')) {
+  if (isResizeObserverError(event)) {
     event.preventDefault()
     return false
   }
@@ -102,7 +107,10 @@ const icons = {
   Setting,
   Bell,
   User,
-  CirclePlus
+  CirclePlus,
+  SwitchButton,
+  Expand,
+  Fold
 }
 
 for (const [key, component] of Object.entries(icons)) {

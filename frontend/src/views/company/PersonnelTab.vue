@@ -38,7 +38,7 @@
       <el-table-column prop="professional_years" label="专业年限" width="80" v-if="personnelType !== 'eight_officers'" />
       <el-table-column prop="certificate_status_display" label="状态" width="80">
         <template #default="{ row }">
-          <el-tag :type="getStatusType(row.certificate_status)" size="small">
+          <el-tag :type="getStatusType('certificate_status', 'certificate_status', row.certificate_status)" size="small">
             {{ row.certificate_status_display }}
           </el-tag>
         </template>
@@ -57,6 +57,7 @@
 <script setup>
 import { computed } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
+import { getStatusType } from '@/store/constants'
 
 const props = defineProps({
   personnelType: {
@@ -83,15 +84,6 @@ const titleMap = {
 }
 
 const title = computed(() => titleMap[props.personnelType] || '人员')
-
-const getStatusType = (status) => {
-  const types = {
-    valid: 'success',
-    expiring: 'warning',
-    expired: 'danger'
-  }
-  return types[status] || 'info'
-}
 
 const getExpiryClass = (row) => {
   if (!row.expiry_date) return ''
@@ -125,10 +117,10 @@ const handleDelete = (row) => {
 }
 
 .expiry-expired {
-  color: #F56C6C;
+  color: #DC2626;
 }
 
 .expiry-expiring {
-  color: #E6A23C;
+  color: #EA580C;
 }
 </style>

@@ -229,3 +229,109 @@ def convert_django_validation_error(error):
         detail = str(error)
 
     return ValidationError(detail)
+
+
+def exception_handler(exc, context):
+    from rest_framework.views import set_rollback
+    from rest_framework.exceptions import (
+        ValidationError as DRFValidationError,
+        PermissionDenied as DRFPermissionDenied,
+        NotAuthenticated,
+        AuthenticationFailed,
+        NotFound as DRFNotFound,
+        Throttled,
+    )
+    from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+    from django.http import Http404
+    from utils.responses import UnifiedResponse
+    from common.constants.error_codes import ErrorCode
+
+    if isinstance(exc, NotAuthenticated):
+        set_rollback()
+        return UnifiedResponse.error(
+            message='身份认证信息未提供',
+            error_code=ErrorCode.AUTH_TOKEN_MISSING.value[0],
+            status_code=status.HTTP_401_UNAUTHORIZED
+        )
+
+    if isinstance(exc, AuthenticationFailed):
+        set_rollback()
+        return UnifiedResponse.error(
+            message='认证失败',
+            error_code=ErrorCode.AUTH_TOKEN_INVALID.value[0],
+            status_code=status.HTTP_401_UNAUTHORIZED
+        )
+
+    if isinstance(exc, (DRFPermissionDenied, DjangoPermissionDenied)):
+        set_rollback()
+        return UnifiedResponse.error(
+            message='无权限执行此操作',
+            error_code=ErrorCode.PERMISSION_DENIED.value[0],
+            status_code=status.HTTP_403_FORBIDDEN
+        )
+
+    if isinstance(exc, Http404):
+        set_rollback()
+        return UnifiedResponse.not_found(message='资源不存在')
+
+    if isinstance(exc, DRFNotFound):
+        set_rollback()
+        return UnifiedResponse.not_found(message=str(exc.detail) if hasattr(exc, 'detail') else '资源不存在')
+
+    if isinstance(exc, DRFValidationError):
+        set_rollback()
+        if isinstance(exc.detail, dict):
+            errors = []
+            for field, messages in exc.detail.items():
+                if isinstance(messages, list):
+                    errors.append(f"{field}: {', '.join(str(m) for m in messages)}")
+                else:
+                    errors.append(f"{field}: {messages}")
+            message = '; '.join(errors)
+        elif isinstance(exc.detail, list):
+            message = '; '.join(str(m) for m in exc.detail)
+        else:
+            message = str(exc.detail)
+        return UnifiedResponse.validation_error(message=message)
+
+    if isinstance(exc, Throttled):
+        set_rollback()
+        wait = exc.wait
+        message = f'请求过于频繁，请{"%.0f" % wait}秒后再试' if wait else '请求过于频繁，请稍后再试'
+        return UnifiedResponse.error(
+            message=message,
+            error_code=ErrorCode.RATE_LIMITED.value[0],
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS
+        )
+
+    if isinstance(exc, BaseAPIException):
+        set_rollback()
+        error_code = getattr(exc, 'error_code', exc.default_code)
+        return UnifiedResponse.error(
+            message=str(exc.detail) if hasattr(exc, 'detail') else str(exc),
+            error_code=error_code if isinstance(error_code, str) else str(error_code),
+            status_code=exc.status_code
+        )
+
+    if isinstance(exc, APIException):
+        set_rollback()
+        return UnifiedResponse.error(
+            message=str(exc.detail) if hasattr(exc, 'detail') else str(exc),
+            error_code=getattr(exc, 'default_code', 'API_ERROR'),
+            status_code=exc.status_code
+        )
+
+    import logging
+    logging.getLogger(__name__).error(
+        f"Unhandled exception: {type(exc).__name__}: {str(exc)}",
+        exc_info=True
+    )
+
+    from django.conf import settings as django_settings
+    if django_settings.DEBUG:
+        message = f'{type(exc).__name__}: {str(exc)}'
+    else:
+        message = '服务器内部错误'
+
+    set_rollback()
+    return UnifiedResponse.server_error(message=message)

@@ -4,6 +4,7 @@
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
+from django.core.validators import MinValueValidator, MaxValueValidator
 
 from core.constants import (
     SOURCE_TYPE_CHOICES,
@@ -53,7 +54,7 @@ class TenderProject(models.Model):
         verbose_name='信息来源',
         related_name='tenders'
     )
-    source_url = models.URLField('来源链接', max_length=1000, blank=True, null=True)
+    source_url = models.URLField('来源链接', max_length=1000, blank=True, null=True, db_index=True)
     
     publish_date = models.DateField('发布日期', db_index=True)
     deadline_date = models.DateField('截止日期', blank=True, null=True)
@@ -71,13 +72,14 @@ class TenderProject(models.Model):
     agency_contact = models.CharField('代理机构联系人', max_length=100, blank=True, null=True)
     agency_phone = models.CharField('代理机构电话', max_length=50, blank=True, null=True)
     
-    budget = models.DecimalField('预算金额', max_digits=15, decimal_places=2, blank=True, null=True)
+    budget = models.DecimalField('预算金额', max_digits=15, decimal_places=2, blank=True, null=True, validators=[MinValueValidator(0)])
     description = models.TextField('项目描述', blank=True, null=True)
     requirements = models.TextField('技术要求', blank=True, null=True)
     
     status = models.CharField('状态', max_length=20, choices=TENDER_STATUS_CHOICES, default='pending', db_index=True)
     is_favorite = models.BooleanField('是否收藏', default=False)
     is_read = models.BooleanField('是否已读', default=False)
+    is_deleted = models.BooleanField('是否删除', default=False, db_index=True)
     
     keywords_matched = models.JSONField('匹配关键词', default=list, blank=True)
     raw_data = models.JSONField('原始数据', default=dict, blank=True)
@@ -101,6 +103,9 @@ class TenderProject(models.Model):
         indexes = [
             models.Index(fields=['status', 'publish_date']),
             models.Index(fields=['region', 'industry']),
+            models.Index(fields=['is_favorite', 'publish_date']),
+            models.Index(fields=['is_read', 'publish_date']),
+            models.Index(fields=['created_at']),
         ]
 
     def __str__(self):
@@ -113,7 +118,8 @@ class TenderFile(models.Model):
     """
     tender = models.ForeignKey(
         TenderProject,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
         verbose_name='招标项目',
         related_name='files'
     )
@@ -170,13 +176,14 @@ class CrawlerTask(models.Model):
     name = models.CharField('任务名称', max_length=200)
     source = models.ForeignKey(
         TenderSource,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
         verbose_name='数据来源',
         related_name='crawler_tasks'
     )
     task_type = models.CharField('任务类型', max_length=50, default='crawl_tenders')
     params = models.JSONField('任务参数', default=dict, blank=True)
-    status = models.CharField('任务状态', max_length=20, choices=CRAWLER_STATUS_CHOICES, default='pending')
+    status = models.CharField('任务状态', max_length=20, choices=CRAWLER_STATUS_CHOICES, default='pending', db_index=True)
     result_count = models.IntegerField('结果数量', default=0)
     error_message = models.TextField('错误信息', blank=True, null=True)
     started_at = models.DateTimeField('开始时间', blank=True, null=True)
@@ -195,6 +202,9 @@ class CrawlerTask(models.Model):
         verbose_name = '爬虫任务'
         verbose_name_plural = verbose_name
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status', 'created_at']),
+        ]
 
     def __str__(self):
         return self.name

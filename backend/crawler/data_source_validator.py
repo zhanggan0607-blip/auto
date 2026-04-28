@@ -139,9 +139,14 @@ class DataSourceValidator:
         """
         同步执行完整验证
         """
-        return asyncio.run(self.validate_async(
-            source_name, source_url, check_compliance, check_technical, check_quality
-        ))
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(self.validate_async(
+                source_name, source_url, check_compliance, check_technical, check_quality
+            ))
+        finally:
+            loop.close()
 
     async def _check_compliance_async(self, url: str, report: DataSourceValidationReport):
         """检查合规性"""

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="search-form">
     <el-form :model="formData" :inline="true" @submit.prevent="handleSearch" class="search-form-inner">
       <slot :form-data="formData" :handle-change="handleChange" />
@@ -91,13 +91,13 @@ const handleChange = (field, value) => {
 .search-btn {
   background: var(--brand-gradient);
   border: none;
-  box-shadow: 0 2px 8px rgba(0, 102, 204, 0.2);
+  box-shadow: 0 2px 8px rgba(26, 86, 219, 0.2);
   transition: all var(--transition-base);
 
   &:hover {
     background: var(--brand-gradient-hover);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0, 102, 204, 0.3);
+    box-shadow: 0 4px 12px rgba(26, 86, 219, 0.3);
   }
 }
 

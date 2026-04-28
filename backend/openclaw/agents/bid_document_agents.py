@@ -16,6 +16,7 @@ class BidDocumentGeneratorAgent(BaseBidAgent):
     """
     标书制作Agent
     负责生成投标文件
+    集成反馈学习：生成时自动注入历史经验优化建议
     """
     agent_type = AgentType.GENERATOR
 
@@ -46,13 +47,16 @@ class BidDocumentGeneratorAgent(BaseBidAgent):
         template_id = task.get('template_id')
 
         try:
+            enhanced_prompt = await self._get_feedback_enhanced_prompt(tender_data, enterprise_data)
+
             document_structure = await self._plan_document_structure(tender_data)
 
             sections = await self._generate_sections(
                 tender_data,
                 enterprise_data,
                 match_result,
-                document_structure
+                document_structure,
+                enhanced_prompt
             )
 
             document = await self._assemble_document(sections, tender_data)
@@ -63,7 +67,8 @@ class BidDocumentGeneratorAgent(BaseBidAgent):
                     'tender_id': tender_data.get('id'),
                     'document': document,
                     'sections': sections,
-                    'total_sections': len(sections)
+                    'total_sections': len(sections),
+                    'feedback_enhanced': bool(enhanced_prompt)
                 },
                 metadata={'agent_id': self.agent_id}
             )
@@ -71,6 +76,27 @@ class BidDocumentGeneratorAgent(BaseBidAgent):
         except Exception as e:
             logger.error(f"标书制作失败: {str(e)}")
             return TaskResult(success=False, error=str(e))
+
+    async def _get_feedback_enhanced_prompt(
+        self,
+        tender_data: Dict[str, Any],
+        enterprise_data: Dict[str, Any]
+    ) -> str:
+        """
+        获取反馈学习增强的提示词
+        """
+        try:
+            from openclaw.feedback_learning import bid_feedback_learner
+            enhancement = await bid_feedback_learner.build_generator_prompt_enhancement(
+                tender_data=tender_data,
+                enterprise_data=enterprise_data
+            )
+            if enhancement:
+                logger.info(f"已注入反馈学习经验提示 ({len(enhancement)} chars)")
+            return enhancement
+        except Exception as e:
+            logger.warning(f"获取反馈学习提示失败: {str(e)}")
+            return ''
 
     async def _plan_document_structure(self, tender_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -122,7 +148,8 @@ class BidDocumentGeneratorAgent(BaseBidAgent):
         tender_data: Dict[str, Any],
         enterprise_data: Dict[str, Any],
         match_result: Dict[str, Any],
-        document_structure: Dict[str, Any]
+        document_structure: Dict[str, Any],
+        enhanced_prompt: str = ''
     ) -> List[Dict[str, Any]]:
         """
         生成各章节内容
@@ -367,6 +394,7 @@ class BidDocumentReviewerAgent(BaseBidAgent):
     """
     标书审核Agent
     负责审核投标文件质量，90分以下需要优化
+    集成反馈学习：审核后自动记录反馈
     """
     agent_type = AgentType.ORCHESTRATOR
 
@@ -417,6 +445,10 @@ class BidDocumentReviewerAgent(BaseBidAgent):
             review_result['is_passed'] = is_passed
             review_result['needs_optimization'] = not is_passed
 
+            await self._record_review_feedback(
+                tender_data, review_result, sections
+            )
+
             return TaskResult(
                 success=True,
                 data={
@@ -432,6 +464,35 @@ class BidDocumentReviewerAgent(BaseBidAgent):
         except Exception as e:
             logger.error(f"标书审核失败: {str(e)}")
             return TaskResult(success=False, error=str(e))
+
+    async def _record_review_feedback(
+        self,
+        tender_data: Dict[str, Any],
+        review_result: Dict[str, Any],
+        sections: List[Dict[str, Any]]
+    ):
+        """
+        将审核结果记录到反馈学习系统
+        """
+        try:
+            from openclaw.feedback_learning import bid_feedback_learner
+
+            await bid_feedback_learner.record_feedback(
+                tender_id=tender_data.get('id', 0),
+                review_result=review_result,
+                bid_result='pending',
+                document_sections=sections,
+                review_scores={
+                    'overall_score': review_result.get('overall_score', 0),
+                    'compliance_score': review_result.get('compliance_score', 0),
+                    'completeness_score': review_result.get('completeness_score', 0),
+                    'quality_score': review_result.get('quality_score', 0),
+                    'competitiveness_score': review_result.get('competitiveness_score', 0),
+                }
+            )
+            logger.info(f"审核反馈已记录到学习系统: score={review_result.get('overall_score', 0)}")
+        except Exception as e:
+            logger.warning(f"记录审核反馈失败: {str(e)}")
 
     async def _review_document(
         self,
@@ -520,12 +581,13 @@ class BidDocumentReviewerAgent(BaseBidAgent):
                 content = content.split('```')[1].split('```')[0]
 
             return json.loads(content.strip())
-        except:
+        except Exception as e:
+            logger.error(f"合规性审核解析失败: {str(e)}")
             return {
-                'score': 70,
-                'strengths': ['基本符合要求'],
-                'weaknesses': ['需要进一步核实'],
-                'suggestions': ['请仔细对照招标要求检查']
+                'score': 0,
+                'strengths': [],
+                'weaknesses': [f'审核失败: {str(e)}'],
+                'suggestions': ['请重新执行审核']
             }
 
     async def _review_completeness(
@@ -583,12 +645,13 @@ class BidDocumentReviewerAgent(BaseBidAgent):
                 content = content.split('```')[1].split('```')[0]
 
             return json.loads(content.strip())
-        except:
+        except Exception as e:
+            logger.error(f"完整性审核解析失败: {str(e)}")
             return {
-                'score': 75,
-                'strengths': ['内容基本完整'],
-                'weaknesses': ['可以进一步优化'],
-                'suggestions': ['建议增加更多细节']
+                'score': 0,
+                'strengths': [],
+                'weaknesses': [f'审核失败: {str(e)}'],
+                'suggestions': ['请重新执行审核']
             }
 
     async def _review_competitiveness(
@@ -622,10 +685,11 @@ class BidDocumentReviewerAgent(BaseBidAgent):
                 content = content.split('```')[1].split('```')[0]
 
             return json.loads(content.strip())
-        except:
+        except Exception as e:
+            logger.error(f"竞争力审核解析失败: {str(e)}")
             return {
-                'score': 70,
-                'strengths': ['有基本竞争力'],
-                'weaknesses': ['竞争力有待提升'],
-                'suggestions': ['建议进一步突出优势']
+                'score': 0,
+                'strengths': [],
+                'weaknesses': [f'审核失败: {str(e)}'],
+                'suggestions': ['请重新执行审核']
             }

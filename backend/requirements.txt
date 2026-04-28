@@ -1,79 +1,81 @@
-# Django
-Django==4.2.7
+# ============================================
+# Django 核心
+# ============================================
+Django==4.2.16
 djangorestframework==3.14.0
-djangorestframework-simplejwt==5.3.0
+djangorestframework-simplejwt==5.3.1
 django-cors-headers==4.3.1
 django-filter==23.5
 django-redis==5.4.0
 django-celery-beat==2.5.0
-python-dotenv==1.0.0
-channels==4.0.0
-daphne==4.0.0
+drf-spectacular==0.27.0
+python-dotenv==1.0.1
+python-json-logger==2.0.7
 
-# WSGI Server
+# ============================================
+# WSGI 服务器
+# ============================================
 gunicorn==21.2.0
 
-# Database
+# ============================================
+# 数据库
+# ============================================
 psycopg2-binary==2.9.9
+redis[hiredis]==5.0.1
 
-# API Documentation
-drf-spectacular==0.27.0
-
-# Celery & Redis Cluster (消息队列)
+# ============================================
+# Celery 任务队列
+# ============================================
 celery==5.3.4
-redis==5.0.1
-kombu==5.3.4
+
+# ============================================
+# FastAPI
+# ============================================
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-multipart==0.0.9
+starlette>=0.37.0,<0.39.0
 websockets>=10.0,<11.0
 
-# Web Scraping - Multi-level Strategy
+# ============================================
+# HTTP 客户端
+# ============================================
+httpx>=0.25.0
+
+# ============================================
+# 爬虫/数据采集
+# ============================================
 selenium==4.15.2
 pyppeteer==1.0.2
 beautifulsoup4==4.12.2
 requests==2.31.0
 aiohttp==3.9.1
 
-# Vector Database
+# ============================================
+# 向量数据库/嵌入
+# ============================================
 chromadb==0.4.22
 openai==1.7.2
 sentence-transformers==2.2.2
 numpy>=1.24.0,<2.0
-pymilvus==2.3.4
-
-# Object Storage
 minio==7.2.3
 
-# Document Processing
+# ============================================
+# 文档处理
+# ============================================
 python-docx==1.1.0
 PyPDF2==3.0.1
 
-# Aliyun OCR
+# ============================================
+# 云服务 SDK
+# ============================================
 alibabacloud-ocr-api20210707==3.1.3
 alibabacloud-tea-openapi>=0.3.14
-alibabacloud-darabonba-env==0.0.1
-
-# DingTalk Notification
 DingtalkChatbot==1.5.7
 
-# FastAPI (异步高性能接口)
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-pydantic==2.5.3
-pydantic-settings==2.1.0
-python-multipart==0.0.6
-sse-starlette==1.8.2
-starlette==0.32.0
-
-# Utilities
-cryptography==41.0.7
-
-# Development
-django-debug-toolbar==4.2.0
-
-# Testing
-pytest==7.4.3
-pytest-django==4.7.0
-pytest-cov==4.1.0
-pytest-asyncio==0.21.1
-
-# Async Redis (redis.asyncio 已包含在 redis[hiredis] 中)
-redis[hiredis]==5.0.1
+# ============================================
+# 安全/加密
+# ============================================
+cryptography==44.0.0

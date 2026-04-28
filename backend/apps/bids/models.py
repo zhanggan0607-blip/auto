@@ -4,6 +4,7 @@
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
+from django.core.validators import MinValueValidator, MaxValueValidator
 
 from core.constants import (
     BID_STATUS_CHOICES,
@@ -22,7 +23,7 @@ class BidRecord(models.Model):
         related_name='bid_record'
     )
     bid_code = models.CharField('投标编号', max_length=100, blank=True, null=True)
-    bid_price = models.DecimalField('投标报价', max_digits=15, decimal_places=2, blank=True, null=True)
+    bid_price = models.DecimalField('投标报价', max_digits=15, decimal_places=2, blank=True, null=True, validators=[MinValueValidator(0)])
     bid_date = models.DateField('投标日期', blank=True, null=True)
     
     status = models.CharField('状态', max_length=20, choices=BID_STATUS_CHOICES, default='preparing')
@@ -49,8 +50,8 @@ class BidRecord(models.Model):
     )
     
     notes = models.TextField('备注', blank=True, null=True)
-    win_probability = models.IntegerField('中标概率', blank=True, null=True, help_text='0-100之间的整数')
-    competitor_count = models.IntegerField('竞争对手数量', blank=True, null=True)
+    win_probability = models.IntegerField('中标概率', blank=True, null=True, help_text='0-100之间的整数', validators=[MinValueValidator(0), MaxValueValidator(100)])
+    competitor_count = models.IntegerField('竞争对手数量', blank=True, null=True, validators=[MinValueValidator(0)])
     
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -86,9 +87,9 @@ class BidResult(models.Model):
     result_type = models.CharField('结果类型', max_length=20, choices=RESULT_TYPE_CHOICES, default='pending')
     
     winner_name = models.CharField('中标单位', max_length=300, blank=True, null=True)
-    winner_price = models.DecimalField('中标金额', max_digits=15, decimal_places=2, blank=True, null=True)
-    our_rank = models.IntegerField('我方排名', blank=True, null=True)
-    total_bidders = models.IntegerField('投标单位数量', blank=True, null=True)
+    winner_price = models.DecimalField('中标金额', max_digits=15, decimal_places=2, blank=True, null=True, validators=[MinValueValidator(0)])
+    our_rank = models.IntegerField('我方排名', blank=True, null=True, validators=[MinValueValidator(1)])
+    total_bidders = models.IntegerField('投标单位数量', blank=True, null=True, validators=[MinValueValidator(0)])
     
     announce_date = models.DateField('公告日期', blank=True, null=True)
     announce_url = models.URLField('公告链接', max_length=1000, blank=True, null=True)
@@ -133,7 +134,7 @@ class BidStatistics(models.Model):
     
     win_rate = models.DecimalField('中标率', max_digits=5, decimal_places=2, default=0)
     
-    year = models.IntegerField('统计年份', default=timezone.now().year)
+    year = models.IntegerField('统计年份')
     month = models.IntegerField('统计月份', blank=True, null=True)
     
     created_at = models.DateTimeField('创建时间', default=timezone.now)
@@ -144,6 +145,7 @@ class BidStatistics(models.Model):
         verbose_name = '投标统计'
         verbose_name_plural = verbose_name
         ordering = ['-year', '-month']
+        unique_together = [['user', 'year', 'month']]
 
     def __str__(self):
         return f"{self.user.username} - {self.year}年统计"

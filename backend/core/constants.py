@@ -285,50 +285,17 @@ BUILDER_LEVEL_CHOICES = [
 
 # ==================== 建造师专业 ====================
 
-BUILDER_MAJOR_ARCHITECTURE = 'architecture'
-BUILDER_MAJOR_MUNICIPAL = 'municipal'
-BUILDER_MAJOR_MECHANICAL_ELECTRICAL = 'mechanical_electrical'
-BUILDER_MAJOR_HIGHWAY = 'highway'
-BUILDER_MAJOR_WATER_CONSERVANCY = 'water_conservancy'
-BUILDER_MAJOR_COMMUNICATION = 'communication'
-BUILDER_MAJOR_MINING = 'mining'
-BUILDER_MAJOR_RAILWAY = 'railway'
-BUILDER_MAJOR_AVIATION = 'aviation'
-BUILDER_MAJOR_PORT = 'port'
-
 BUILDER_MAJOR_CHOICES = [
-    (BUILDER_MAJOR_ARCHITECTURE, '建筑工程'),
-    (BUILDER_MAJOR_MUNICIPAL, '市政公用工程'),
-    (BUILDER_MAJOR_MECHANICAL_ELECTRICAL, '机电工程'),
-    (BUILDER_MAJOR_HIGHWAY, '公路工程'),
-    (BUILDER_MAJOR_WATER_CONSERVANCY, '水利水电工程'),
-    (BUILDER_MAJOR_COMMUNICATION, '通信与广电工程'),
-    (BUILDER_MAJOR_MINING, '矿业工程'),
-    (BUILDER_MAJOR_RAILWAY, '铁路工程'),
-    (BUILDER_MAJOR_AVIATION, '民航机场工程'),
-    (BUILDER_MAJOR_PORT, '港口与航道工程'),
-]
-
-# ==================== 结构类型 ====================
-
-STRUCTURE_TYPE_FRAME = 'frame'
-STRUCTURE_TYPE_SHEAR_WALL = 'shear_wall'
-STRUCTURE_TYPE_FRAME_SHEAR = 'frame_shear'
-STRUCTURE_TYPE_STEEL = 'steel'
-STRUCTURE_TYPE_TUBE = 'tube'
-STRUCTURE_TYPE_BRICK_CONCRETE = 'brick_concrete'
-STRUCTURE_TYPE_WOOD = 'wood'
-STRUCTURE_TYPE_OTHER = 'other'
-
-STRUCTURE_TYPE_CHOICES = [
-    (STRUCTURE_TYPE_FRAME, '框架结构'),
-    (STRUCTURE_TYPE_SHEAR_WALL, '剪力墙结构'),
-    (STRUCTURE_TYPE_FRAME_SHEAR, '框架-剪力墙结构'),
-    (STRUCTURE_TYPE_STEEL, '钢结构'),
-    (STRUCTURE_TYPE_TUBE, '筒体结构'),
-    (STRUCTURE_TYPE_BRICK_CONCRETE, '砖混结构'),
-    (STRUCTURE_TYPE_WOOD, '木结构'),
-    (STRUCTURE_TYPE_OTHER, '其他'),
+    ('architecture', '建筑工程'),
+    ('municipal', '市政公用工程'),
+    ('mechanical_electrical', '机电工程'),
+    ('highway', '公路工程'),
+    ('water_conservancy', '水利水电工程'),
+    ('communication', '通信与广电工程'),
+    ('mining', '矿业工程'),
+    ('railway', '铁路工程'),
+    ('aviation', '民航机场工程'),
+    ('port', '港口与航道工程'),
 ]
 
 # ==================== 资质等级 ====================
@@ -824,20 +791,6 @@ QUALIFICATION_TYPE_CHOICES = [
     (QUALIFICATION_TYPE_SPECIAL, '特种工程专业承包'),
 ]
 
-# ==================== 体系认证 ====================
-
-CERTIFICATION_ISO9001 = 'iso9001'
-CERTIFICATION_ISO14001 = 'iso14001'
-CERTIFICATION_ISO45001 = 'iso45001'
-CERTIFICATION_NONE = 'none'
-
-CERTIFICATION_CHOICES = [
-    (CERTIFICATION_ISO9001, 'ISO9001'),
-    (CERTIFICATION_ISO14001, 'ISO14001'),
-    (CERTIFICATION_ISO45001, 'ISO45001'),
-    (CERTIFICATION_NONE, '不作要求'),
-]
-
 # ==================== 企业类型 ====================
 
 ENTERPRISE_TYPE_LIMITED = 'limited'
@@ -880,6 +833,22 @@ FILE_TYPE_CHOICES = [
     (FILE_TYPE_CLARIFICATION, '澄清文件'),
     (FILE_TYPE_RESULT, '中标公告'),
     (FILE_TYPE_OTHER, '其他'),
+]
+
+# ==================== 项目类型 ====================
+
+PROJECT_TYPE_CONSTRUCTION = 'construction'
+PROJECT_TYPE_SERVICE = 'service'
+PROJECT_TYPE_GOODS = 'goods'
+PROJECT_TYPE_ENGINEERING = 'engineering'
+PROJECT_TYPE_OTHER = 'other'
+
+PROJECT_TYPE_CHOICES = [
+    (PROJECT_TYPE_CONSTRUCTION, '工程建设'),
+    (PROJECT_TYPE_SERVICE, '服务采购'),
+    (PROJECT_TYPE_GOODS, '货物采购'),
+    (PROJECT_TYPE_ENGINEERING, '工程设计'),
+    (PROJECT_TYPE_OTHER, '其他'),
 ]
 
 # ==================== 关键词类别 ====================
@@ -1013,6 +982,7 @@ NOTIFICATION_TYPE_TENDER_DEADLINE = 'tender_deadline'
 NOTIFICATION_TYPE_BID_RESULT = 'bid_result'
 NOTIFICATION_TYPE_SYSTEM = 'system'
 NOTIFICATION_TYPE_TASK = 'task'
+NOTIFICATION_TYPE_CRAWL_COMPLETED = 'crawl_completed'
 
 NOTIFICATION_TYPE_CHOICES = [
     (NOTIFICATION_TYPE_TENDER_NEW, '新招标公告'),
@@ -1020,6 +990,7 @@ NOTIFICATION_TYPE_CHOICES = [
     (NOTIFICATION_TYPE_BID_RESULT, '中标结果'),
     (NOTIFICATION_TYPE_SYSTEM, '系统通知'),
     (NOTIFICATION_TYPE_TASK, '任务提醒'),
+    (NOTIFICATION_TYPE_CRAWL_COMPLETED, '采集完成'),
 ]
 
 # ==================== 优先级 ====================
@@ -1088,24 +1059,6 @@ VECTOR_DOC_TYPE_CHOICES = [
     (VECTOR_DOC_TYPE_CONTRACT_TEMPLATE, '合同范本'),
     (VECTOR_DOC_TYPE_CASE_STUDY, '案例资料'),
     (VECTOR_DOC_TYPE_OTHER, '其他文档'),
-]
-
-# ==================== 企业资质类型 ====================
-
-ENTERPRISE_QUAL_TYPE_BUSINESS_LICENSE = 'business_license'
-ENTERPRISE_QUAL_TYPE_QUALIFICATION_CERT = 'qualification_cert'
-ENTERPRISE_QUAL_TYPE_SAFETY_CERT = 'safety_cert'
-ENTERPRISE_QUAL_TYPE_ISO_CERT = 'iso_cert'
-ENTERPRISE_QUAL_TYPE_INDUSTRY_CERT = 'industry_cert'
-ENTERPRISE_QUAL_TYPE_OTHER = 'other'
-
-ENTERPRISE_QUAL_TYPE_CHOICES = [
-    (ENTERPRISE_QUAL_TYPE_BUSINESS_LICENSE, '营业执照'),
-    (ENTERPRISE_QUAL_TYPE_QUALIFICATION_CERT, '资质证书'),
-    (ENTERPRISE_QUAL_TYPE_SAFETY_CERT, '安全生产许可证'),
-    (ENTERPRISE_QUAL_TYPE_ISO_CERT, 'ISO认证'),
-    (ENTERPRISE_QUAL_TYPE_INDUSTRY_CERT, '行业资质'),
-    (ENTERPRISE_QUAL_TYPE_OTHER, '其他'),
 ]
 
 # ==================== 业绩类型 ====================
@@ -1236,35 +1189,7 @@ AUDIT_ACTION_TYPE_CHOICES = [
     (AUDIT_ACTION_BATCH_DELETE, '批量删除'),
 ]
 
-# ==================== 搜索规则类型 ====================
 
-SEARCH_RULE_TYPE_INCLUDE = 'include'
-SEARCH_RULE_TYPE_EXCLUDE = 'exclude'
-SEARCH_RULE_TYPE_REPLACE = 'replace'
-SEARCH_RULE_TYPE_WEIGHT = 'weight'
-
-SEARCH_RULE_TYPE_CHOICES = [
-    (SEARCH_RULE_TYPE_INCLUDE, '包含规则'),
-    (SEARCH_RULE_TYPE_EXCLUDE, '排除规则'),
-    (SEARCH_RULE_TYPE_REPLACE, '替换规则'),
-    (SEARCH_RULE_TYPE_WEIGHT, '权重规则'),
-]
-
-# ==================== 搜索任务状态 ====================
-
-SEARCH_TASK_STATUS_PENDING = 'pending'
-SEARCH_TASK_STATUS_RUNNING = 'running'
-SEARCH_TASK_STATUS_COMPLETED = 'completed'
-SEARCH_TASK_STATUS_FAILED = 'failed'
-
-SEARCH_TASK_STATUS_CHOICES = [
-    (SEARCH_TASK_STATUS_PENDING, '待执行'),
-    (SEARCH_TASK_STATUS_RUNNING, '执行中'),
-    (SEARCH_TASK_STATUS_COMPLETED, '已完成'),
-    (SEARCH_TASK_STATUS_FAILED, '执行失败'),
-]
-
-# ==================== 日志级别 ====================
 
 LOG_LEVEL_DEBUG = 'debug'
 LOG_LEVEL_INFO = 'info'
@@ -1278,216 +1203,54 @@ LOG_LEVEL_CHOICES = [
     (LOG_LEVEL_ERROR, 'ERROR'),
 ]
 
-# ==================== 行业分类系统（用于投标文档向量库） ====================
+# ==================== 采集保障检查状态 ====================
 
-INDUSTRY_CATEGORY_BUILDING = 'building'
-INDUSTRY_CATEGORY_MUNICIPAL = 'municipal'
-INDUSTRY_CATEGORY_TRANSPORTATION = 'transportation'
-INDUSTRY_CATEGORY_WATER_CONSERVANCY = 'water_conservancy'
-INDUSTRY_CATEGORY_POWER = 'power'
-INDUSTRY_CATEGORY_TELECOMMUNICATION = 'telecommunication'
-INDUSTRY_CATEGORY_MECHANICAL_ELECTRICAL = 'mechanical_electrical'
-INDUSTRY_CATEGORY_PETROCHEMICAL = 'petrochemical'
-INDUSTRY_CATEGORY_MINING = 'mining'
-INDUSTRY_CATEGORY_METALLURGY = 'metallurgy'
-INDUSTRY_CATEGORY_TEXTILE = 'textile'
-INDUSTRY_CATEGORY_ENVIRONMENTAL = 'environmental'
-INDUSTRY_CATEGORY_AGRICULTURE_FORESTRY = 'agriculture_forestry'
-INDUSTRY_CATEGORY_MEDICAL = 'medical'
-INDUSTRY_CATEGORY_EDUCATION = 'education'
-INDUSTRY_CATEGORY_FINANCE = 'finance'
-INDUSTRY_CATEGORY_IT = 'it'
-INDUSTRY_CATEGORY_COMMERCE = 'commerce'
-INDUSTRY_CATEGORY_CULTURE_TOURISM = 'culture_tourism'
-INDUSTRY_CATEGORY_OTHER = 'other'
+ASSURANCE_CHECK_PENDING = 'pending'
+ASSURANCE_CHECK_RUNNING = 'running'
+ASSURANCE_CHECK_PASSED = 'passed'
+ASSURANCE_CHECK_FAILED = 'failed'
+ASSURANCE_CHECK_WARNING = 'warning'
 
-INDUSTRY_CATEGORY_CHOICES = [
-    (INDUSTRY_CATEGORY_BUILDING, '房屋建筑'),
-    (INDUSTRY_CATEGORY_MUNICIPAL, '市政公用'),
-    (INDUSTRY_CATEGORY_TRANSPORTATION, '交通运输'),
-    (INDUSTRY_CATEGORY_WATER_CONSERVANCY, '水利水电'),
-    (INDUSTRY_CATEGORY_POWER, '电力能源'),
-    (INDUSTRY_CATEGORY_TELECOMMUNICATION, '通信信息'),
-    (INDUSTRY_CATEGORY_MECHANICAL_ELECTRICAL, '机电安装'),
-    (INDUSTRY_CATEGORY_PETROCHEMICAL, '石油化工'),
-    (INDUSTRY_CATEGORY_MINING, '矿山工程'),
-    (INDUSTRY_CATEGORY_METALLURGY, '冶金工程'),
-    (INDUSTRY_CATEGORY_TEXTILE, '纺织轻工'),
-    (INDUSTRY_CATEGORY_ENVIRONMENTAL, '生态环境'),
-    (INDUSTRY_CATEGORY_AGRICULTURE_FORESTRY, '农林牧渔'),
-    (INDUSTRY_CATEGORY_MEDICAL, '医疗卫生'),
-    (INDUSTRY_CATEGORY_EDUCATION, '教育文化'),
-    (INDUSTRY_CATEGORY_FINANCE, '金融服务'),
-    (INDUSTRY_CATEGORY_IT, '信息技术'),
-    (INDUSTRY_CATEGORY_COMMERCE, '商业服务'),
-    (INDUSTRY_CATEGORY_CULTURE_TOURISM, '文化旅游'),
-    (INDUSTRY_CATEGORY_OTHER, '其他行业'),
+ASSURANCE_CHECK_STATUS_CHOICES = [
+    (ASSURANCE_CHECK_PENDING, '待检查'),
+    (ASSURANCE_CHECK_RUNNING, '检查中'),
+    (ASSURANCE_CHECK_PASSED, '通过'),
+    (ASSURANCE_CHECK_FAILED, '失败'),
+    (ASSURANCE_CHECK_WARNING, '警告'),
 ]
 
-INDUSTRY_SUBCATEGORY_CHOICES = [
-    (INDUSTRY_CATEGORY_BUILDING, '房屋建筑', [
-        ('building_residential', '住宅建筑'),
-        ('building_commercial', '商业建筑'),
-        ('building_office', '办公建筑'),
-        ('building_industrial', '工业建筑'),
-        ('building_public', '公共建筑'),
-        ('building_ancient', '古建筑'),
-        ('building_decoration', '装饰装修'),
-    ]),
-    (INDUSTRY_CATEGORY_MUNICIPAL, '市政公用', [
-        ('municipal_road', '道路桥梁'),
-        ('municipal_water', '给水排水'),
-        ('municipal_gas', '燃气热力'),
-        ('municipal_landscape', '园林景观'),
-        ('municipal_environmental', '环境卫生'),
-        ('municipal_transit', '公共交通'),
-        ('municipal_energy', '综合管廊'),
-    ]),
-    (INDUSTRY_CATEGORY_TRANSPORTATION, '交通运输', [
-        ('transport_highway', '公路工程'),
-        ('transport_railway', '铁路工程'),
-        ('transport_subway', '城市轨道交通'),
-        ('transport_port', '港口航道'),
-        ('transport_airport', '机场工程'),
-        ('transport_logistics', '物流仓储'),
-    ]),
-    (INDUSTRY_CATEGORY_WATER_CONSERVANCY, '水利水电', [
-        ('water_dam', '水库大坝'),
-        ('water_flood', '防洪堤防'),
-        ('water_drainage', '排涝灌溉'),
-        ('water_hydro', '水力发电'),
-        ('water_tunnel', '引水隧洞'),
-        ('water_environmental', '水环境治理'),
-    ]),
-    (INDUSTRY_CATEGORY_POWER, '电力能源', [
-        ('power_thermal', '火电工程'),
-        ('power_nuclear', '核电工程'),
-        ('power_wind', '风电工程'),
-        ('power_solar', '光伏发电'),
-        ('power_grid', '电网工程'),
-        ('power_transformer', '输变电工程'),
-    ]),
-    (INDUSTRY_CATEGORY_TELECOMMUNICATION, '通信信息', [
-        ('telecom_network', '网络工程'),
-        ('telecom_software', '软件工程'),
-        ('telecom_data', '数据中心'),
-        ('telecom_security', '信息安全'),
-        ('telecom_intelligent', '智慧城市'),
-    ]),
-    (INDUSTRY_CATEGORY_MECHANICAL_ELECTRICAL, '机电安装', [
-        ('mechanical_equipment', '机械设备安装'),
-        ('mechanical_electrical', '电气设备安装'),
-        ('mechanical_automation', '工业自动化'),
-        ('mechanical_elevator', '电梯安装'),
-        ('mechanical_fire', '消防设施'),
-    ]),
-    (INDUSTRY_CATEGORY_PETROCHEMICAL, '石油化工', [
-        ('petrochemical_refinery', '炼油化工'),
-        ('petrochemical_gas', '油气储运'),
-        ('petrochemical_pipeline', '管道工程'),
-        ('petrochemical_pharmaceutical', '制药工程'),
-        ('petrochemical_hazard', '危险化学品'),
-    ]),
-    (INDUSTRY_CATEGORY_MINING, '矿山工程', [
-        ('mining_coal', '煤炭矿山'),
-        ('mining_metal', '金属矿山'),
-        ('mining_nonmetal', '非金属矿山'),
-        ('mining_processing', '选矿加工'),
-        ('mining_environmental', '矿山环境'),
-    ]),
-    (INDUSTRY_CATEGORY_METALLURGY, '冶金工程', [
-        ('metallurgy_steel', '钢铁冶金'),
-        ('metallurgy_nonferrous', '有色金属'),
-        ('metallurgy_rolling', '金属压延'),
-        ('metallurgy_alloy', '特种合金'),
-    ]),
-    (INDUSTRY_CATEGORY_TEXTILE, '纺织轻工', [
-        ('textile_weaving', '纺织工程'),
-        ('textile_printing', '印染工程'),
-        ('textile_food', '食品工程'),
-        ('textile_paper', '造纸工程'),
-        ('textile_leather', '皮革工程'),
-    ]),
-    (INDUSTRY_CATEGORY_ENVIRONMENTAL, '生态环境', [
-        ('environmental_wastewater', '污水处理'),
-        ('environmental_waste', '固废处理'),
-        ('environmental_atmospheric', '大气治理'),
-        ('environmental_ecological', '生态修复'),
-        ('environmental_monitoring', '环境监测'),
-    ]),
-    (INDUSTRY_CATEGORY_AGRICULTURE_FORESTRY, '农林牧渔', [
-        ('agri_cultivation', '种植业'),
-        ('agri_forestry', '林业工程'),
-        ('agri_animal', '畜牧养殖'),
-        ('agri_fishery', '渔业工程'),
-        ('agri_agricultural', '农田水利'),
-    ]),
-    (INDUSTRY_CATEGORY_MEDICAL, '医疗卫生', [
-        ('medical_hospital', '医院建设'),
-        ('medical_equipment', '医疗设备'),
-        ('medical_pharmaceutical', '医药工程'),
-        ('medical_elderly', '养老设施'),
-    ]),
-    (INDUSTRY_CATEGORY_EDUCATION, '教育文化', [
-        ('education_school', '学校建设'),
-        ('education_scientific', '科研设施'),
-        ('education_culture', '文化设施'),
-        ('education_sports', '体育设施'),
-    ]),
-    (INDUSTRY_CATEGORY_FINANCE, '金融服务', [
-        ('finance_bank', '银行金融'),
-        ('finance_insurance', '保险业'),
-        ('finance_investment', '投资管理'),
-    ]),
-    (INDUSTRY_CATEGORY_IT, '信息技术', [
-        ('it_software', '软件开发'),
-        ('it_hardware', '硬件设备'),
-        ('it_data_center', '数据中心'),
-        ('it_network', '网络基础设施'),
-    ]),
-    (INDUSTRY_CATEGORY_COMMERCE, '商业服务', [
-        ('commerce_retail', '商业零售'),
-        ('commerce_logistics', '物流运输'),
-        ('commerce_property', '物业管理'),
-        ('commerce_consulting', '咨询顾问'),
-    ]),
-    (INDUSTRY_CATEGORY_CULTURE_TOURISM, '文化旅游', [
-        ('culture_museum', '博物馆纪念馆'),
-        ('culture_tourism', '旅游景区'),
-        ('culture_entertainment', '文化娱乐'),
-        ('culture_heritage', '文物保护'),
-    ]),
-    (INDUSTRY_CATEGORY_OTHER, '其他行业', [
-        ('other_real_estate', '房地产开发'),
-        ('other_construction', '建筑服务'),
-        ('other_government', '政府公共'),
-        ('other_emergency', '应急救援'),
-        ('other_national', '国防军工'),
-    ]),
+# ==================== 采集保障报告状态 ====================
+
+ASSURANCE_REPORT_RUNNING = 'running'
+ASSURANCE_REPORT_SUCCESS = 'success'
+ASSURANCE_REPORT_FAILED = 'failed'
+ASSURANCE_REPORT_MAX_RETRIES = 'max_retries'
+
+ASSURANCE_REPORT_STATUS_CHOICES = [
+    (ASSURANCE_REPORT_RUNNING, '执行中'),
+    (ASSURANCE_REPORT_SUCCESS, '成功'),
+    (ASSURANCE_REPORT_FAILED, '失败'),
+    (ASSURANCE_REPORT_MAX_RETRIES, '达到上限'),
 ]
 
-# ==================== 搜索逻辑运算符 ====================
+# ==================== 优化措施类型 ====================
 
-SEARCH_OPERATOR_AND = 'AND'
-SEARCH_OPERATOR_OR = 'OR'
-SEARCH_OPERATOR_NOT = 'NOT'
+OPTIMIZATION_UA_ROTATE = 'ua_rotate'
+OPTIMIZATION_PROXY_SWITCH = 'proxy_switch'
+OPTIMIZATION_RULE_UPDATE = 'rule_update'
+OPTIMIZATION_CAPTCHA_HANDLE = 'captcha_handle'
+OPTIMIZATION_FREQUENCY_ADJUST = 'frequency_adjust'
+OPTIMIZATION_STRATEGY_DOWNGRADE = 'strategy_downgrade'
+OPTIMIZATION_COOKIES_REFRESH = 'cookies_refresh'
 
-SEARCH_OPERATOR_CHOICES = [
-    (SEARCH_OPERATOR_AND, '且 (AND)'),
-    (SEARCH_OPERATOR_OR, '或 (OR)'),
-    (SEARCH_OPERATOR_NOT, '非 (NOT)'),
+OPTIMIZATION_TYPE_CHOICES = [
+    (OPTIMIZATION_UA_ROTATE, '动态调整User-Agent'),
+    (OPTIMIZATION_PROXY_SWITCH, 'IP代理切换'),
+    (OPTIMIZATION_RULE_UPDATE, '更新数据提取规则'),
+    (OPTIMIZATION_CAPTCHA_HANDLE, '验证码识别'),
+    (OPTIMIZATION_FREQUENCY_ADJUST, '调整请求频率'),
+    (OPTIMIZATION_STRATEGY_DOWNGRADE, '降级采集策略'),
+    (OPTIMIZATION_COOKIES_REFRESH, '刷新Cookie'),
 ]
 
-# ==================== 项目类型分类 ====================
 
-PROJECT_TYPE_NEW = 'new'
-PROJECT_TYPE_RENOVATION = 'renovation'
-PROJECT_TYPE_EXPANSION = 'expansion'
-PROJECT_TYPE_MAINTENANCE = 'maintenance'
-
-PROJECT_TYPE_CHOICES = [
-    (PROJECT_TYPE_NEW, '新建项目'),
-    (PROJECT_TYPE_RENOVATION, '改建项目'),
-    (PROJECT_TYPE_EXPANSION, '扩建项目'),
-    (PROJECT_TYPE_MAINTENANCE, '维保项目'),
-]

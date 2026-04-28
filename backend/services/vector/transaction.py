@@ -63,7 +63,7 @@ class VectorTransaction:
     def __init__(self):
         self._operations: List[VectorOperation] = []
         self._status = TransactionStatus.PENDING
-        self._chroma_available = chroma_client.is_available()
+        self._chroma_available = chroma_client.is_available
 
     def add_vector(
         self,

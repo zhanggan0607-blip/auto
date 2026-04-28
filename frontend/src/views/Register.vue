@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="register-container">
     <div class="register-box">
       <h2 class="register-title">用户注册</h2>
@@ -136,7 +136,7 @@ const handleRegister = async () => {
   display: flex;
   justify-content: center;
   align-items: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #1A56DB 0%, #1E40AF 100%);
 }
 
 .register-box {
@@ -150,7 +150,7 @@ const handleRegister = async () => {
 .register-title {
   text-align: center;
   font-size: 24px;
-  color: #303133;
+  color: #1E293B;
   margin-bottom: 30px;
 }
 
@@ -166,10 +166,10 @@ const handleRegister = async () => {
 
 .register-footer {
   text-align: center;
-  color: #909399;
+  color: #64748B;
   
   a {
-    color: #409EFF;
+    color: #3B82F6;
     margin-left: 5px;
   }
 }

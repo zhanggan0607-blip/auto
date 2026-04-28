@@ -129,6 +129,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { documentApi } from '@/api/document'
 import { getDocStatusType, getDocStatusText } from '@/store/constants'
+import { parseListResponse } from '@/utils/response-parser'
 
 const activeTab = ref('templates')
 const loading = ref(false)
@@ -178,7 +179,8 @@ const fetchTemplates = async () => {
   loading.value = true
   try {
     const res = await documentApi.getTemplates()
-    templateList.value = res.data?.list || []
+    const { list } = parseListResponse(res)
+    templateList.value = list
   } catch (error) {
     console.error('获取模板列表失败:', error)
   } finally {
@@ -190,7 +192,8 @@ const fetchGeneratedDocs = async () => {
   loading.value = true
   try {
     const res = await documentApi.getGeneratedList()
-    generatedList.value = res.data?.list || []
+    const { list } = parseListResponse(res)
+    generatedList.value = list
   } catch (error) {
     console.error('获取文档列表失败:', error)
   } finally {

@@ -51,10 +51,8 @@ class ContentModeration:
     ]
 
     SENSITIVE_PATTERNS = [
-        (r'\d{15,18}', 'ID_CARD', '身份证号'),
-        (r'\d{4}[-/]\d{2}[-/]\d{2}', 'DATE', '日期'),
-        (r'1[3-9]\d{9}', 'PHONE', '手机号'),
-        (r'\d{6,}', 'NUMBERS', '长数字序列'),
+        (r'(?<!\d)\d{17}[\dXx](?!\d)', 'ID_CARD', '身份证号'),
+        (r'1[3-9]\d{9}(?!\d)', 'PHONE', '手机号'),
     ]
 
     PROMPT_INJECTION_PATTERNS = [
@@ -135,10 +133,10 @@ class ContentModeration:
             risk_types.append('OVER_LENGTH')
             suggestions.append('文本过长，建议拆分处理')
 
-        if 'select' in text.lower() and 'from' in text.lower():
-            if re.search(r'(?i)(union|select|insert|update|delete|drop)\s', text):
-                risk_types.append('SQL_LIKE')
-                suggestions.append('检测到SQL语句特征，建议验证输入来源')
+        sql_pattern = r'(?i)\b(union\s+select|select\s+.+\s+from\s|insert\s+into|update\s+.+\s+set|delete\s+from|drop\s+table|alter\s+table)\b'
+        if re.search(sql_pattern, text):
+            risk_types.append('SQL_LIKE')
+            suggestions.append('检测到SQL语句特征，建议验证输入来源')
 
         if any(proto in text.lower() for proto in ['http://', 'https://', 'ftp://']):
             url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
@@ -197,15 +195,6 @@ class ContentModeration:
         return '; '.join([descriptions.get(r, r) for r in risk_types])
 
     def sanitize_text(self, text: str) -> str:
-        """
-        对文本进行脱敏处理
-
-        Args:
-            text: 待脱敏文本
-
-        Returns:
-            str: 脱敏后的文本
-        """
         if not text:
             return text
 

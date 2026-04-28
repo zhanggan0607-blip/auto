@@ -2,18 +2,24 @@
 统一大模型服务
 支持多模型切换，为不同Agent提供模型服务
 
-使用适配器模式，核心调用逻辑下沉到 llm_adapters.py
+使用适配器模式，通过 services.llm.adapters 统一接口调用
 """
+import hashlib
+import json
 import logging
 import time
 from typing import Any, Dict, List, Optional
 
+from django.core.cache import cache
 from apps.openclaw.models import LLMProvider, LLMModel, AgentModelConfig, LLMUsageLog
-from .llm_adapters import get_adapter
+from services.llm.adapters import get_adapter
 from asgiref.sync import sync_to_async
 
 
 logger = logging.getLogger(__name__)
+
+_USAGE_LOG_BUFFER = []
+_USAGE_LOG_BUFFER_SIZE = 20
 
 
 class UnifiedLLMService:
@@ -116,47 +122,73 @@ class UnifiedLLMService:
             raise ValueError("没有可用的模型提供商")
 
         model_config = None
-        if agent_type:
-            model_config = self.get_model_config(agent_type)
-            if model_config:
-                if model_config.chat_model:
-                    model_id = model_config.chat_model.model_id
-                    provider = model_config.chat_model.provider
-                if temperature is None:
-                    temperature = model_config.temperature
-                if max_tokens is None:
-                    max_tokens = model_config.max_tokens
-                if system_prompt is None and model_config.system_prompt:
-                    system_prompt = model_config.system_prompt
+        actual_model_id = model_id
+        actual_temperature = temperature
+        actual_max_tokens = max_tokens
+        actual_system_prompt = system_prompt
 
-        if model_id is None:
-            model_id = provider.default_model
-        if temperature is None:
-            temperature = provider.temperature or 0.7
-        if max_tokens is None:
-            max_tokens = provider.max_tokens or 4096
+        if agent_type:
+            def get_config():
+                cfg = self.get_model_config(agent_type)
+                if cfg:
+                    result = {
+                        'chat_model_model_id': getattr(cfg.chat_model, 'model_id', None) if cfg.chat_model_id else None,
+                        'chat_model_provider': getattr(cfg.chat_model, 'provider', None) if cfg.chat_model_id else None,
+                        'temperature': cfg.temperature,
+                        'max_tokens': cfg.max_tokens,
+                        'system_prompt': cfg.system_prompt,
+                    }
+                    return result
+                return None
+
+            config_data = await sync_to_async(get_config)()
+            if config_data:
+                if config_data['chat_model_model_id']:
+                    actual_model_id = config_data['chat_model_model_id']
+                    provider = config_data['chat_model_provider']
+                if actual_temperature is None:
+                    actual_temperature = config_data['temperature']
+                if actual_max_tokens is None:
+                    actual_max_tokens = config_data['max_tokens']
+                if actual_system_prompt is None:
+                    actual_system_prompt = config_data['system_prompt']
+
+        if actual_model_id is None:
+            actual_model_id = provider.default_model
+        if actual_temperature is None:
+            actual_temperature = provider.temperature or 0.7
+        if actual_max_tokens is None:
+            actual_max_tokens = provider.max_tokens or 4096
 
         messages = []
-        if system_prompt:
-            messages.append({'role': 'system', 'content': system_prompt})
+        if actual_system_prompt:
+            messages.append({'role': 'system', 'content': actual_system_prompt})
         if history:
             messages.extend(history)
         messages.append({'role': 'user', 'content': message})
 
+        cache_key = None
+        if actual_temperature is not None and actual_temperature < 0.01:
+            cache_key = self._build_cache_key(actual_model_id, messages, actual_max_tokens)
+            cached = cache.get(cache_key)
+            if cached:
+                logger.debug(f"LLM缓存命中: {cache_key[:16]}...")
+                return cached
+
         try:
             adapter = get_adapter(provider)
             content, usage = await adapter.chat(
-                model_id=model_id,
+                model_id=actual_model_id,
                 messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens
+                temperature=actual_temperature,
+                max_tokens=actual_max_tokens
             )
 
             latency = time.time() - start_time
 
             await self._log_usage_async(
                 provider=provider,
-                model=model_id,
+                model=actual_model_id,
                 agent_type=agent_type,
                 session_id=session_id,
                 input_tokens=usage.get('input_tokens', 0),
@@ -165,21 +197,26 @@ class UnifiedLLMService:
                 success=True
             )
 
-            return {
+            result = {
                 'content': content,
                 'input_tokens': usage.get('input_tokens', 0),
                 'output_tokens': usage.get('output_tokens', 0),
                 'total_tokens': usage.get('total_tokens', 0),
                 'latency': latency,
-                'model': model_id,
+                'model': actual_model_id,
                 'provider': provider.name
             }
+
+            if cache_key:
+                cache.set(cache_key, result, 3600)
+
+            return result
 
         except Exception as e:
             latency = time.time() - start_time
             await self._log_usage_async(
                 provider=provider,
-                model=model_id,
+                model=actual_model_id,
                 agent_type=agent_type,
                 session_id=session_id,
                 latency=latency,
@@ -232,23 +269,75 @@ class UnifiedLLMService:
         error_message: str = None
     ):
         """
-        异步记录使用日志
+        异步记录使用日志（缓冲批量写入）
         """
+        global _USAGE_LOG_BUFFER
+
+        log_entry = {
+            'provider_id': provider.id if provider else None,
+            'model': model,
+            'agent_type': agent_type,
+            'session_id': session_id,
+            'input_tokens': input_tokens,
+            'output_tokens': output_tokens,
+            'total_tokens': input_tokens + output_tokens,
+            'latency': latency,
+            'success': success,
+            'error_message': error_message
+        }
+
+        _USAGE_LOG_BUFFER.append(log_entry)
+
+        if len(_USAGE_LOG_BUFFER) >= _USAGE_LOG_BUFFER_SIZE:
+            await self._flush_usage_log_buffer()
+
+    async def _flush_usage_log_buffer(self):
+        """
+        刷新使用日志缓冲区到数据库
+        """
+        global _USAGE_LOG_BUFFER
+
+        if not _USAGE_LOG_BUFFER:
+            return
+
+        logs_to_write = _USAGE_LOG_BUFFER[:]
+        _USAGE_LOG_BUFFER = []
+
         try:
-            await sync_to_async(LLMUsageLog.objects.create)(
-                provider=provider,
-                model=model,
-                agent_type=agent_type,
-                session_id=session_id,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                total_tokens=input_tokens + output_tokens,
-                latency=latency,
-                success=success,
-                error_message=error_message
-            )
+            def _bulk_create():
+                log_objects = []
+                for entry in logs_to_write:
+                    try:
+                        provider = LLMProvider.objects.get(id=entry['provider_id']) if entry['provider_id'] else None
+                        log_objects.append(LLMUsageLog(
+                            provider=provider,
+                            model=entry['model'],
+                            agent_type=entry['agent_type'],
+                            session_id=entry['session_id'],
+                            input_tokens=entry['input_tokens'],
+                            output_tokens=entry['output_tokens'],
+                            total_tokens=entry['total_tokens'],
+                            latency=entry['latency'],
+                            success=entry['success'],
+                            error_message=entry['error_message']
+                        ))
+                    except Exception:
+                        pass
+                if log_objects:
+                    LLMUsageLog.objects.bulk_create(log_objects, ignore_conflicts=True)
+
+            await sync_to_async(_bulk_create)()
         except Exception as e:
-            logger.error(f"异步记录使用日志失败: {str(e)}")
+            logger.error(f"批量写入使用日志失败: {str(e)}")
+
+    @staticmethod
+    def _build_cache_key(model_id: str, messages: List[Dict], max_tokens: int) -> str:
+        """
+        构建LLM响应缓存键
+        """
+        content = json.dumps(messages, ensure_ascii=False, sort_keys=True)
+        content_hash = hashlib.md5(content.encode()).hexdigest()
+        return f"llm:cache:{model_id}:{content_hash}:{max_tokens}"
 
     async def reasoning(
         self,
@@ -293,6 +382,56 @@ class UnifiedLLMService:
             system_prompt=system_prompt,
             session_id=session_id
         )
+
+    async def analyze_image(
+        self,
+        image_base64: str,
+        prompt: str,
+        model_id: str = 'qwen3-vl:8b',
+        agent_type: str = 'vision',
+        max_tokens: int = 8192
+    ) -> Dict[str, Any]:
+        """
+        使用视觉模型分析图片（异步版本）
+        """
+        import httpx
+        import json
+        from django.conf import settings
+
+        base_url = getattr(settings, 'OLLAMA_BASE_URL', 'http://localhost:11434')
+        url = f"{base_url}/api/generate"
+
+        payload = {
+            'model': model_id,
+            'prompt': prompt,
+            'images': [image_base64],
+            'stream': False,
+            'thinking': False,
+            'options': {
+                'temperature': 0.1,
+                'num_predict': max_tokens
+            }
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=600) as client:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                content = data.get('response', '')
+                return {
+                    'content': content,
+                    'success': True,
+                    'model': model_id
+                }
+        except Exception as e:
+            logger.error(f"视觉分析失败: {str(e)}")
+            return {
+                'content': '',
+                'success': False,
+                'error': str(e),
+                'model': model_id
+            }
 
 
 unified_llm_service = UnifiedLLMService()

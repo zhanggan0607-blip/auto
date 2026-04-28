@@ -2,6 +2,8 @@
 FastAPI主应用入口
 异步高性能接口层 - Django + FastAPI双轨制
 """
+import json
+import logging
 import os
 import sys
 from contextlib import asynccontextmanager
@@ -12,10 +14,12 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+logger = logging.getLogger(__name__)
+
 backend_path = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_path))
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.development')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.production')
 django.setup()
 
 from fastapi_app.api import (
@@ -33,6 +37,7 @@ from core.streaming import (
     stream_manager,
     BidirectionalStreamManager,
     StreamingAgentMixin,
+    StreamEventType,
     router as stream_router,
 )
 
@@ -44,10 +49,6 @@ celery_proxy = CeleryTaskProxy()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    应用生命周期管理
-    启动时初始化连接，关闭时清理
-    """
     await pubsub_manager.connect()
     yield
     await pubsub_manager.disconnect()
@@ -99,15 +100,15 @@ app.include_router(stream_router, prefix="/api/v1/stream", tags=["流式通信"]
 
 @app.websocket("/ws/stream/{agent_id}")
 async def websocket_stream_endpoint(websocket: WebSocket, agent_id: str):
-    """
-    WebSocket流式通信端点
-    支持Agent双向流式通信
-    """
     await websocket.accept()
+
+    user_id = None
+    if hasattr(websocket, 'user') and websocket.user and hasattr(websocket.user, 'id'):
+        user_id = websocket.user.id
 
     session = await stream_manager.create_session(
         agent_id=agent_id,
-        user_id=None,
+        user_id=user_id,
     )
 
     from core.streaming import WebSocketStreamHandler
@@ -123,7 +124,6 @@ async def websocket_stream_endpoint(websocket: WebSocket, agent_id: str):
 
         while True:
             data = await websocket.receive_text()
-            import json
             message = json.loads(data)
 
             event_type = message.get("type", "message")
@@ -146,7 +146,6 @@ async def websocket_stream_endpoint(websocket: WebSocket, agent_id: str):
 
 @app.get("/health/", tags=["健康检查"])
 async def health_check():
-    """健康检查接口"""
     return {
         "status": "healthy",
         "service": "fastapi-app",
@@ -156,7 +155,6 @@ async def health_check():
 
 @app.get("/ready/", tags=["健康检查"])
 async def readiness_check():
-    """就绪检查"""
     try:
         from django.db import connection
         with connection.cursor() as cursor:
@@ -167,33 +165,26 @@ async def readiness_check():
             "database": "connected",
             "redis": "connected" if redis_ok else "disconnected",
         }
-    except Exception as e:
+    except Exception:
         return JSONResponse(
             status_code=503,
             content={
                 "status": "not_ready",
-                "error": str(e),
             }
         )
 
 
 @app.get("/api/v1/status/", tags=["系统状态"])
-async def system_status():
-    """获取系统整体状态"""
-    from django.conf import settings as django_settings
+async def system_status(request: Request):
+    if not hasattr(request, 'user') or not request.user or not request.user.is_staff:
+        return JSONResponse(status_code=403, content={"detail": "Forbidden"})
 
     return {
         "celery": {
-            "broker": django_settings.CELERY_BROKER_URL,
-            "result_backend": django_settings.CELERY_RESULT_BACKEND,
+            "broker_configured": bool(os.getenv('CELERY_BROKER_URL') or os.getenv('REDIS_HOST')),
         },
         "vector": {
-            "type": "milvus_cluster",
-            "host": os.getenv('MILVUS_HOST', 'localhost'),
-            "port": os.getenv('MILVUS_PORT', '19530'),
-        },
-        "crawler": {
-            "pilot_websites": django_settings.PILOT_WEBSITES,
+            "type": os.getenv('VECTOR_DB_TYPE', 'chroma'),
         },
         "stream": {
             "active_sessions": len(stream_manager.get_active_sessions()),
@@ -203,14 +194,10 @@ async def system_status():
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """全局异常处理"""
-    import logging
-    logger = logging.getLogger(__name__)
     logger.error(f"FastAPI全局异常: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
         content={
             "detail": "Internal server error",
-            "message": str(exc),
         }
     )

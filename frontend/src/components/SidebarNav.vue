@@ -123,6 +123,7 @@ import { ArrowRight, Bell, CircleCheck, CircleClose, Refresh, QuestionFilled, Wa
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { getSystemServices } from '@/api/system'
 import { restartService } from '@/api/monitor'
+import { useUserStore } from '@/store/user'
 
 const props = defineProps({
   isCollapse: {
@@ -137,6 +138,7 @@ const props = defineProps({
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
 
 const services = ref([])
 const loadingServices = ref(false)
@@ -231,7 +233,8 @@ const handleRestart = async (service) => {
     await fetchServices()
   } catch (error) {
     if (error !== 'cancel') {
-      console.error('重启服务失败:', error)
+      const msg = error?.response?.data?.message || error?.message || '重启失败'
+      ElMessage.error(msg)
     }
   } finally {
     restartingService.value = null
@@ -299,7 +302,7 @@ const automationStatusText = computed(() => {
   return texts[status] || '自动化空闲'
 })
 
-const visibleMenuItems = computed(() => [
+const allMenuItems = [
   { path: '/dashboard', title: '首页', icon: 'DataBoard' },
   {
     path: '/tender',
@@ -307,7 +310,8 @@ const visibleMenuItems = computed(() => [
     icon: 'Search',
     children: [
       { path: '/schedules', title: '定时采集' },
-      { path: '/keywords', title: '关键词管理' }
+      { path: '/keywords', title: '关键词管理' },
+      { path: '/crawl-statistics', title: '采集统计' }
     ]
   },
   {
@@ -315,7 +319,7 @@ const visibleMenuItems = computed(() => [
     title: '投标管理',
     icon: 'TrendCharts',
     children: [
-      { path: '/tenders', title: '已投标项目' },
+      { path: '/tenders', title: '招标项目' },
       { path: '/bids', title: '投标记录' }
     ]
   },
@@ -329,22 +333,50 @@ const visibleMenuItems = computed(() => [
       { path: '/vectorlib', title: '文档向量库' }
     ]
   },
-  { path: '/automation', title: '自动化工作台', icon: 'Monitor' },
-  { path: '/automation-monitor', title: '自动化监控', icon: 'DataAnalysis' },
+  {
+    path: '/automation',
+    title: '自动化',
+    icon: 'Monitor',
+    children: [
+      { path: '/automation', title: '工作台', isDefault: true },
+      { path: '/automation-config', title: '全自动化配置' },
+      { path: '/automation-monitor', title: '监控' }
+    ]
+  },
   {
     path: '/system',
     title: '系统管理',
     icon: 'Setting',
     children: [
-      { path: '/system/users', title: '用户管理' },
-      { path: '/system/models', title: '模型选择' },
-      { path: '/system/monitor', title: '服务监控' },
+      { path: '/system/users', title: '用户管理', requiresAdmin: true },
+      { path: '/system/models', title: '模型选择', requiresAdmin: true },
+      { path: '/system/monitor', title: '服务监控', requiresAdmin: true },
       { path: '/system/playground', title: 'AI Playground' },
-      { path: '/system/multi-view-demo', title: 'MultiViewDialog演示' },
-      { path: '/system/templates', title: '网站模板管理' }
+      { path: '/system/knowledge', title: '项目知识库' },
+      { path: '/system/templates', title: '网站模板管理', requiresAdmin: true }
     ]
   }
-])
+]
+
+const visibleMenuItems = computed(() => {
+  const isAdmin = userStore.isAdmin
+  return allMenuItems.filter(item => {
+    if (item.requiresAdmin && !isAdmin) return false
+    if (item.children) {
+      const visibleChildren = item.children.filter(child => !child.requiresAdmin || isAdmin)
+      if (visibleChildren.length === 0) return false
+    }
+    return true
+  }).map(item => {
+    if (item.children) {
+      return {
+        ...item,
+        children: item.children.filter(child => !child.requiresAdmin || isAdmin)
+      }
+    }
+    return item
+  })
+})
 
 watch(() => route.path, () => {
   visibleMenuItems.value.forEach(item => {
@@ -421,7 +453,7 @@ watch(() => route.path, () => {
     }
 
     &.status-idle {
-      background: #909399;
+      background: var(--color-info);
     }
 
     &.status-error {
@@ -511,7 +543,7 @@ watch(() => route.path, () => {
   &.is-active {
     background: var(--sidebar-active-bg);
     color: var(--sidebar-text-active);
-    box-shadow: 0 2px 8px rgba(0, 102, 204, 0.25);
+    box-shadow: 0 2px 8px rgba(26, 86, 219, 0.25);
 
     &::before {
       content: '';
@@ -558,8 +590,8 @@ watch(() => route.path, () => {
   }
 
   &.is-active {
-    background: rgba(0, 102, 204, 0.15);
-    color: var(--sidebar-primary-light, #3399FF);
+    background: rgba(26, 86, 219, 0.15);
+    color: var(--color-primary-light);
     font-weight: var(--font-weight-medium);
 
     &::before {
@@ -640,22 +672,22 @@ watch(() => route.path, () => {
 
       &.status-running {
         color: var(--color-success);
-        background: rgba(103, 194, 58, 0.15);
+        background: rgba(22, 163, 74, 0.15);
       }
 
       &.status-error {
         color: var(--color-danger);
-        background: rgba(245, 108, 108, 0.15);
+        background: rgba(220, 38, 38, 0.15);
       }
 
       &.status-stopped {
         color: var(--color-warning);
-        background: rgba(230, 162, 60, 0.15);
+        background: rgba(234, 88, 12, 0.15);
       }
 
       &.status-degraded {
         color: var(--color-warning);
-        background: rgba(230, 162, 60, 0.1);
+        background: rgba(234, 88, 12, 0.1);
       }
 
       &.status-unknown {

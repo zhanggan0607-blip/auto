@@ -1,34 +1,29 @@
-"""
-权限基类
-提供基础的DRF权限类
-"""
 from rest_framework import permissions
 
 
 class IsAdminUser(permissions.BasePermission):
-    """
-    仅允许管理员访问
-    """
-
     def has_permission(self, request, view):
         return request.user and request.user.is_authenticated and request.user.is_admin()
 
 
 class IsOwnerOrAdmin(permissions.BasePermission):
-    """
-    仅允许所有者或管理员访问
-    """
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        if request.user.is_admin():
+            return True
+        return True
 
     def has_object_permission(self, request, view, obj):
         if request.user.is_admin():
             return True
-        return obj.user == request.user if hasattr(obj, 'user') else obj == request.user
+        if hasattr(obj, 'user'):
+            return obj.user == request.user
+        if hasattr(obj, 'created_by'):
+            return obj.created_by == request.user
+        return obj == request.user
 
 
 class IsAuthenticated(permissions.BasePermission):
-    """
-    仅允许已认证用户访问
-    """
-
     def has_permission(self, request, view):
         return request.user and request.user.is_authenticated

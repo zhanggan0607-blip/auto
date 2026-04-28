@@ -67,16 +67,17 @@ class ChinaGovCrawler(BaseCrawler):
         })
     
     def crawl(self, notice_types: List[str] = None, keywords: List[str] = None,
-              page: int = 1, page_size: int = 20, start_date: str = None,
-              end_date: str = None, region: str = None) -> List[Dict[str, Any]]:
+              page: int = 1, page_size: int = 20, max_pages: int = None,
+              start_date: str = None, end_date: str = None, region: str = None) -> List[Dict[str, Any]]:
         """
         爬取采购公告信息
         
         Args:
             notice_types: 公告类型列表
             keywords: 关键词列表
-            page: 页码
+            page: 起始页码
             page_size: 每页数量
+            max_pages: 最大采集页数（None时默认3页）
             start_date: 开始日期 (YYYY-MM-DD)
             end_date: 结束日期 (YYYY-MM-DD)
             region: 地区过滤
@@ -88,6 +89,8 @@ class ChinaGovCrawler(BaseCrawler):
         
         if notice_types is None:
             notice_types = ['gkzb', 'jzxcs', 'zbjg']
+        
+        effective_max_pages = max_pages if max_pages else 3
         
         for notice_type in notice_types:
             if notice_type not in self.NOTICE_TYPE_MAP:
@@ -103,7 +106,10 @@ class ChinaGovCrawler(BaseCrawler):
                     keywords=keywords,
                     page=page,
                     page_size=page_size,
-                    region=region
+                    max_pages=effective_max_pages,
+                    region=region,
+                    start_date=start_date,
+                    end_date=end_date
                 )
                 results.extend(type_results)
                 logger.info(f"{type_info['name']} 采集完成，获取 {len(type_results)} 条数据")
@@ -118,50 +124,76 @@ class ChinaGovCrawler(BaseCrawler):
         return results
     
     def _crawl_by_type(self, notice_type: str, keywords: List[str] = None,
-                       page: int = 1, page_size: int = 20,
-                       region: str = None) -> List[Dict[str, Any]]:
+                       page: int = 1, page_size: int = 20, max_pages: int = 3,
+                       region: str = None, start_date: str = None,
+                       end_date: str = None) -> List[Dict[str, Any]]:
         """
         按类型爬取公告
         """
         results = []
         
         type_info = self.NOTICE_TYPE_MAP.get(notice_type, {})
-        url = f"{self.BASE_URL}{type_info.get('url', '')}"
+        base_url = f"{self.BASE_URL}{type_info.get('url', '')}"
         
-        try:
-            html = self._fetch_page(url)
-            if not html:
-                return results
+        for current_page in range(1, max_pages + 1):
+            if current_page == 1:
+                url = base_url
+            else:
+                url = f"{base_url}index_{current_page}.htm"
             
-            soup = self.parse_html(html)
-            items = self._extract_items(soup)
-            
-            logger.info(f"提取到 {len(items)} 个公告项")
-            
-            for item in items:
-                try:
-                    tender_data = self._parse_item(item, notice_type)
-                    if not tender_data:
-                        continue
-
-                    if region and region not in tender_data.get('region', ''):
-                        continue
-
-                    if keywords:
-                        if not self._match_keywords(tender_data, keywords):
+            try:
+                html = self._fetch_page(url)
+                if not html:
+                    break
+                
+                soup = self.parse_html(html)
+                items = self._extract_items(soup)
+                
+                logger.info(f"第{current_page}页提取到 {len(items)} 个公告项")
+                
+                if not items:
+                    break
+                
+                for item in items:
+                    try:
+                        tender_data = self._parse_item(item, notice_type)
+                        if not tender_data:
                             continue
 
-                    results.append(tender_data)
+                        if region and region not in tender_data.get('region', ''):
+                            continue
 
-                    if len(results) >= page_size:
-                        break
+                        if keywords:
+                            if not self._match_keywords(tender_data, keywords):
+                                continue
 
-                except Exception as e:
-                    logger.error(f"解析公告项目失败: {str(e)}")
-                    continue
-            
-        except Exception as e:
-            logger.error(f"爬取公告失败: {notice_type}, 错误: {str(e)}")
+                        if start_date or end_date:
+                            publish_date = tender_data.get('publish_date', '')
+                            if publish_date:
+                                if start_date and publish_date < start_date:
+                                    continue
+                                if end_date and publish_date > end_date:
+                                    continue
+                            else:
+                                continue
+
+                        results.append(tender_data)
+
+                        if len(results) >= page_size:
+                            break
+
+                    except Exception as e:
+                        logger.error(f"解析公告项目失败: {str(e)}")
+                        continue
+                
+                if len(results) >= page_size:
+                    break
+                
+                time.sleep(2)
+                
+            except Exception as e:
+                logger.error(f"爬取公告失败: {notice_type} 第{current_page}页, 错误: {str(e)}")
+                break
         
         return results
     
@@ -173,7 +205,8 @@ class ChinaGovCrawler(BaseCrawler):
             logger.info(f"正在获取页面: {url}")
             response = self.session.get(url, timeout=self.config.timeout)
             response.raise_for_status()
-            response.encoding = 'utf-8'
+            if not response.encoding or response.encoding.lower() == 'iso-8859-1':
+                response.encoding = response.apparent_encoding or 'utf-8'
             logger.info(f"页面获取成功，内容长度: {len(response.text)}")
             return response.text
         except Exception as e:
@@ -319,25 +352,27 @@ class ChinaGovCrawler(BaseCrawler):
 
     def _validate_url(self, url: str) -> bool:
         """
-        验证URL是否有效（HTTP HEAD请求检查状态码）
-
-        Args:
-            url: 待验证的URL
-
-        Returns:
-            bool: URL有效返回True，无效返回False
+        验证URL是否有效
+        对于政府网站，HEAD请求常常失败（405/403/503），
+        因此采用宽松策略：只有明确的404才判定无效，其他情况默认通过
         """
         if not url:
             return False
         try:
             response = self.session.head(url, timeout=10, allow_redirects=True)
-            is_valid = response.status_code == 200
-            if not is_valid:
-                logger.warning(f"URL无效 [{response.status_code}]: {url}")
-            return is_valid
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"URL验证失败 [{type(e).__name__}]: {url}")
-            return False
+            if response.status_code == 404:
+                logger.warning(f"URL返回404: {url}")
+                return False
+            return True
+        except requests.exceptions.RequestException:
+            try:
+                response = self.session.get(url, timeout=10, allow_redirects=True)
+                if response.status_code == 404:
+                    logger.warning(f"URL返回404: {url}")
+                    return False
+                return True
+            except requests.exceptions.RequestException:
+                return True
     
     def get_notice_types(self) -> Dict[str, Dict[str, str]]:
         """

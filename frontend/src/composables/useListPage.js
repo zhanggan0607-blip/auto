@@ -4,6 +4,7 @@
  */
 import { ref, reactive, computed } from 'vue'
 import { useMessage } from './usePagination'
+import { parseListResponse } from '@/utils/response-parser'
 
 /**
  * 列表页面通用Hook
@@ -82,35 +83,27 @@ export function useListPage(options = {}) {
     loading.value = true
     try {
       const response = await fetchApi(searchParams.value)
-      let result = response?.data?.data
-      if (result === undefined) {
-        result = response?.data
-      }
-      if (result === undefined) {
-        result = response
-      }
-      if (typeof result !== 'object' || result === null) {
-        result = {}
+      const { list: items, total } = parseListResponse(response)
+
+      const validItems = Array.isArray(items)
+        ? items.filter(item => item && typeof item === 'object')
+        : []
+
+      if (formatItem && Array.isArray(validItems)) {
+        list.value = validItems.map(formatItem)
+      } else {
+        list.value = validItems
       }
 
-      let items = result.list || result.results || []
-      if (!Array.isArray(items)) {
-        items = []
-      }
-      if (formatItem) {
-        items = items.map(formatItem)
-      }
-
-      list.value = items
-      pagination.total = result.total || result.count || result.pagination?.total || 0
+      pagination.total = total
 
       if (onFetchSuccess) {
-        await onFetchSuccess(result)
+        await onFetchSuccess(response)
       }
 
       return {
         success: true,
-        data: result
+        data: response
       }
     } catch (error) {
       console.error('获取列表数据失败:', error)
@@ -305,7 +298,7 @@ export function useListPage(options = {}) {
     })
   }
 
-  return {
+  return reactive({
     loading,
     list,
     pagination,
@@ -329,5 +322,5 @@ export function useListPage(options = {}) {
     handleBatchDelete,
     handleExport,
     reset
-  }
+  })
 }

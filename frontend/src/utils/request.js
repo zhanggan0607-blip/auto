@@ -1,30 +1,21 @@
 /**
  * Axios请求封装
  * 提供统一的API请求处理，支持httpOnly cookie认证
- * 安全改进：Token从Cookie读取，不从localStorage
+ * 
+ * 认证机制：
+ * - access_token 由后端通过 Set-Cookie (HttpOnly) 设置，浏览器自动携带
+ * - 前端通过 sessionStorage 存储 token 副本，用于 Authorization 请求头
+ * - CookieJWTAuthentication 优先读 Authorization 头，其次读 Cookie
+ * - 401 时自动通过 refresh_token Cookie 刷新 access_token
+ * 
  * @module utils/request
  */
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/store/user'
 import router from '@/router'
+import { getCookie } from '@/utils/cookie'
 
-/**
- * 从Cookie中获取指定名称的值
- * @param {string} name - Cookie名称
- * @returns {string|null}
- */
-function getCookie(name) {
-  const value = `; ${document.cookie}`
-  const parts = value.split(`; ${name}=`)
-  if (parts.length === 2) return parts.pop().split(';').shift()
-  return null
-}
-
-/**
- * Axios实例
- * @type {import('axios').AxiosInstance}
- */
 const axiosInstance = axios.create({
   baseURL: '/api',
   timeout: 120000,
@@ -34,14 +25,8 @@ const axiosInstance = axios.create({
   withCredentials: true
 })
 
-/** @type {Map<string, AbortController>} 存储请求的AbortController */
 const pendingRequests = new Map()
 
-/**
- * 取消指定标签的所有请求
- * @param {string} tag - 请求标签
- * @returns {void}
- */
 function cancelPendingRequests(tag) {
   const controller = pendingRequests.get(tag)
   if (controller) {
@@ -50,10 +35,6 @@ function cancelPendingRequests(tag) {
   }
 }
 
-/**
- * 取消所有待处理的请求
- * @returns {void}
- */
 function cancelAllPendingRequests() {
   pendingRequests.forEach((controller) => {
     controller.abort()
@@ -61,84 +42,61 @@ function cancelAllPendingRequests() {
   pendingRequests.clear()
 }
 
-/** @type {boolean} 是否正在刷新Token */
 let isRefreshing = false
+let hasLoggedOut = false
+let lastRefreshAttempt = 0
+const MIN_REFRESH_INTERVAL = 5000
 
-/** @type {Array<Function>} Token刷新订阅者队列 */
 let refreshSubscribers = []
 
-/**
- * 订阅Token刷新事件
- * @param {Function} callback - 刷新完成后的回调函数
- * @returns {void}
- */
 function subscribeTokenRefresh(callback) {
   refreshSubscribers.push(callback)
 }
 
-/**
- * Token刷新成功时通知所有订阅者
- * @param {string} token - 新的访问令牌
- * @returns {void}
- */
 function onRefreshed(token) {
   refreshSubscribers.forEach(callback => callback(token))
   refreshSubscribers = []
 }
 
-/**
- * Token刷新失败时通知所有订阅者
- * @returns {void}
- */
 function onRefreshFailed() {
   refreshSubscribers.forEach(callback => callback(null))
   refreshSubscribers = []
 }
 
-/**
- * 刷新访问令牌
- * 使用httpOnly cookie中的refresh token，从sessionStorage读取
- * @async
- * @returns {Promise<string|null>} 新的访问令牌或null
- */
 async function refreshAccessToken() {
-  const refreshToken = sessionStorage.getItem('refresh_token')
-
-  if (!refreshToken) {
-    console.error('No refresh token available')
+  const now = Date.now()
+  if (now - lastRefreshAttempt < MIN_REFRESH_INTERVAL) {
     return null
   }
+  lastRefreshAttempt = now
 
   try {
     const response = await axios.post('/api/v1/auth/token/refresh/',
-      { refresh: refreshToken },
+      {},
       { withCredentials: true }
     )
 
     const newAccessToken = response.data.data?.access || response.data.access
 
     if (newAccessToken) {
-      const expires = new Date(Date.now() + 2 * 60 * 60 * 1000).toUTCString()
-      document.cookie = `access_token=${newAccessToken}; path=/; HttpOnly; SameSite=Strict; expires=${expires}`
+      const userStore = useUserStore()
+      userStore.setToken(newAccessToken)
     }
 
     return newAccessToken
   } catch (error) {
-    console.error('Token refresh failed:', error)
+    if (error?.response?.status === 429) {
+      lastRefreshAttempt = Date.now() + 30000
+    }
     return null
   }
 }
 
-/**
- * 请求拦截器
- * 自动从Cookie读取Token、CSRF Token并添加请求头
- * 安全改进：CSRF Token自动添加到请求头
- */
 axiosInstance.interceptors.request.use(
   config => {
-    const token = getCookie('access_token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
+    const storedToken = sessionStorage.getItem('access_token')
+    if (storedToken) {
+      config.headers.Authorization = `Bearer ${storedToken}`
     }
 
     const csrfToken = getCookie('csrftoken')
@@ -160,10 +118,67 @@ axiosInstance.interceptors.request.use(
   }
 )
 
-/**
- * 响应拦截器
- * 处理响应数据和错误，自动清理取消控制器
- */
+function extractErrorMessage(errorData, status) {
+  if (!errorData) return HTTP_ERROR_MAP[status] || '请求失败'
+
+  if (typeof errorData === 'string') {
+    return errorData.substring(0, 200)
+  }
+
+  if (typeof errorData !== 'object') {
+    return HTTP_ERROR_MAP[status] || '请求失败'
+  }
+
+  if (errorData.message && typeof errorData.message === 'string') {
+    return errorData.message
+  }
+
+  if (errorData.error && typeof errorData.error === 'string') {
+    return errorData.error
+  }
+
+  if (errorData.detail && typeof errorData.detail === 'string') {
+    return errorData.detail
+  }
+
+  if (errorData.errors && typeof errorData.errors === 'object') {
+    return formatFieldErrors(errorData.errors)
+  }
+
+  const fieldErrors = Object.entries(errorData)
+    .filter(([key]) => !['code', 'message', 'data', 'success'].includes(key))
+  if (fieldErrors.length > 0) {
+    return formatFieldErrors(Object.fromEntries(fieldErrors))
+  }
+
+  return HTTP_ERROR_MAP[status] || '请求失败'
+}
+
+function formatFieldErrors(errors) {
+  const messages = []
+  for (const [field, err] of Object.entries(errors)) {
+    if (Array.isArray(err)) {
+      messages.push(`${field}: ${err.join(', ')}`)
+    } else if (typeof err === 'string') {
+      messages.push(`${field}: ${err}`)
+    } else if (err && typeof err === 'object' && err.message) {
+      messages.push(`${field}: ${err.message}`)
+    }
+  }
+  return messages.length > 0 ? messages.join('\n') : '请求参数错误'
+}
+
+const HTTP_ERROR_MAP = {
+  400: '请求参数错误',
+  401: '登录已过期，请重新登录',
+  403: '没有权限访问',
+  404: '请求的资源不存在',
+  429: '请求过于频繁，请稍后重试',
+  500: '服务器错误',
+  502: '网关错误',
+  503: '服务暂不可用',
+}
+
 axiosInstance.interceptors.response.use(
   response => {
     if (response.config.requestTag && response.config._controller) {
@@ -190,8 +205,9 @@ axiosInstance.interceptors.response.use(
     if (error.response) {
       const status = error.response.status
       const skipErrorMessage = originalRequest?.skipErrorMessage
+      const errorData = error.response.data
 
-      if (status === 401 && !originalRequest._retry) {
+      if (status === 401 && !originalRequest._retry && !originalRequest._skipAuthRetry) {
         if (isRefreshing) {
           return new Promise((resolve, reject) => {
             subscribeTokenRefresh((token) => {
@@ -199,12 +215,6 @@ axiosInstance.interceptors.response.use(
                 originalRequest.headers.Authorization = `Bearer ${token}`
                 resolve(axiosInstance(originalRequest))
               } else {
-                const userStore = useUserStore()
-                userStore.logout()
-                if (!skipErrorMessage) {
-                  ElMessage.error('登录已过期，请重新登录')
-                }
-                router.push('/login')
                 reject(error)
               }
             })
@@ -213,6 +223,7 @@ axiosInstance.interceptors.response.use(
 
         originalRequest._retry = true
         isRefreshing = true
+        hasLoggedOut = false
 
         try {
           const newToken = await refreshAccessToken()
@@ -223,106 +234,38 @@ axiosInstance.interceptors.response.use(
             return axiosInstance(originalRequest)
           } else {
             onRefreshFailed()
-            const userStore = useUserStore()
-            userStore.logout()
-            if (!skipErrorMessage) {
-              ElMessage.error('登录已过期，请重新登录')
+            if (!hasLoggedOut) {
+              hasLoggedOut = true
+              const userStore = useUserStore()
+              userStore.logout()
+              if (!skipErrorMessage) {
+                ElMessage.error('登录已过期，请重新登录')
+              }
+              router.push('/login')
             }
-            router.push('/login')
             return Promise.reject(error)
           }
         } finally {
           isRefreshing = false
         }
       } else if (status === 401) {
-        const userStore = useUserStore()
-        userStore.logout()
-        if (!skipErrorMessage) {
-          ElMessage.error('登录已过期，请重新登录')
-        }
-        router.push('/login')
-      } else if (status === 403) {
-        if (!skipErrorMessage) {
-          ElMessage.error('没有权限访问')
-        }
-      } else if (status === 404) {
-        if (!skipErrorMessage) {
-          ElMessage.error('请求的资源不存在')
-        }
-      } else if (status === 500) {
-        if (!skipErrorMessage) {
-          const errorData = error.response?.data
-          let errorMsg = '服务器错误'
-          if (errorData != null) {
-            if (typeof errorData === 'object') {
-              if (typeof errorData.error === 'string' && errorData.error) {
-                errorMsg = errorData.error
-              } else if (typeof errorData.message === 'string' && errorData.message) {
-                errorMsg = errorData.message
-              } else if (typeof errorData.detail === 'string' && errorData.detail) {
-                errorMsg = errorData.detail
-              }
-            } else if (typeof errorData === 'string' && errorData.length > 0) {
-              errorMsg = errorData.substring(0, 200)
-            }
-          }
-          ElMessage.error(errorMsg)
-        }
-      } else if (status === 400) {
-        const errorData = error.response.data
-        let errorMsg = '请求参数错误'
-        if (errorData && typeof errorData === 'object') {
-          if (errorData.errors && typeof errorData.errors === 'object') {
-            const messages = []
-            for (const [field, err] of Object.entries(errorData.errors)) {
-              if (Array.isArray(err)) {
-                messages.push(`${field}: ${err.join(', ')}`)
-              } else if (typeof err === 'string') {
-                messages.push(`${field}: ${err}`)
-              } else if (err && typeof err === 'object' && err.message) {
-                messages.push(`${field}: ${err.message}`)
-              }
-            }
-            if (messages.length > 0) {
-              errorMsg = messages.join('\n')
-              if (!skipErrorMessage) {
-                ElMessage.error(errorMsg)
-              }
-            } else if (!skipErrorMessage) {
-              ElMessage.error(errorData.message || errorMsg)
-            }
-          } else if (errorData.detail) {
-            errorMsg = errorData.detail
+        if (!originalRequest._skipAuthRetry) {
+          if (!hasLoggedOut) {
+            hasLoggedOut = true
+            const userStore = useUserStore()
+            userStore.logout()
             if (!skipErrorMessage) {
-              ElMessage.error(errorMsg)
+              ElMessage.error('登录已过期，请重新登录')
             }
-          } else if (errorData.message) {
-            errorMsg = errorData.message
-            if (!skipErrorMessage) {
-              ElMessage.error(errorMsg)
-            }
-          } else {
-            const messages = []
-            for (const [field, errors] of Object.entries(errorData)) {
-              if (Array.isArray(errors)) {
-                messages.push(`${field}: ${errors.join(', ')}`)
-              } else if (typeof errors === 'string') {
-                messages.push(`${field}: ${errors}`)
-              }
-            }
-            if (messages.length > 0) {
-              errorMsg = messages.join('\n')
-              if (!skipErrorMessage) {
-                ElMessage.error(errorMsg)
-              }
-            } else if (!skipErrorMessage) {
-              ElMessage.error(errorMsg)
-            }
+            router.push('/login')
           }
-        } else if (!skipErrorMessage) {
-          ElMessage.error(errorMsg)
         }
+      } else {
+        const errorMsg = extractErrorMessage(errorData, status)
         error.message = errorMsg
+        if (!skipErrorMessage) {
+          ElMessage.error(errorMsg)
+        }
       }
     } else {
       if (!originalRequest?.skipErrorMessage) {
@@ -339,54 +282,30 @@ axiosInstance.interceptors.response.use(
   }
 )
 
-/**
- * 导出request对象，提供统一的API请求方法
- */
 const request = {
-  /**
-   * 发送GET请求
-   * @param {string} url - 请求URL
-   * @param {Object} params - 查询参数
-   * @param {Object} options - 额外选项
-   * @param {string} options.tag - 请求标签，用于取消请求
-   * @returns {Promise}
-   */
-  get(url, params = {}, options = {}) {
-    return axiosInstance.get(url, { params, ...options })
+  get(url, paramsOrConfig = {}, options = {}) {
+    if (paramsOrConfig && typeof paramsOrConfig === 'object' && paramsOrConfig.params && typeof paramsOrConfig.params === 'object') {
+      return axiosInstance.get(url, { ...paramsOrConfig, ...options })
+    }
+    return axiosInstance.get(url, { params: paramsOrConfig, ...options })
   },
 
-  /**
-   * 发送POST请求
-   * @param {string} url - 请求URL
-   * @param {Object} data - 请求体数据
-   * @param {Object} options - 额外选项
-   * @param {string} options.tag - 请求标签，用于取消请求
-   * @returns {Promise}
-   */
   post(url, data = {}, options = {}) {
+    if (data instanceof FormData) {
+      return axiosInstance.post(url, data, {
+        ...options,
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      })
+    }
     return axiosInstance.post(url, data, options)
   },
 
-  /**
-   * 发送PUT请求
-   * @param {string} url - 请求URL
-   * @param {Object} data - 请求体数据
-   * @param {Object} options - 额外选项
-   * @param {string} options.tag - 请求标签，用于取消请求
-   * @returns {Promise}
-   */
   put(url, data = {}, options = {}) {
     return axiosInstance.put(url, data, options)
   },
 
-  /**
-   * 发送PATCH请求
-   * @param {string} url - 请求URL
-   * @param {Object} data - 请求体数据
-   * @param {Object} options - 额外选项
-   * @param {string} options.tag - 请求标签，用于取消请求
-   * @returns {Promise}
-   */
   patch(url, data = {}, options = {}) {
     if (data instanceof FormData) {
       return axiosInstance.patch(url, data, {
@@ -399,40 +318,17 @@ const request = {
     return axiosInstance.patch(url, data, options)
   },
 
-  /**
-   * 发送DELETE请求
-   * @param {string} url - 请求URL
-   * @param {Object} params - 查询参数
-   * @param {Object} options - 额外选项
-   * @param {string} options.tag - 请求标签，用于取消请求
-   * @returns {Promise}
-   */
-  delete(url, params = {}, options = {}) {
-    return axiosInstance.delete(url, { params, ...options })
+  delete(url, paramsOrConfig = {}, options = {}) {
+    if (paramsOrConfig && typeof paramsOrConfig === 'object' && paramsOrConfig.params && typeof paramsOrConfig.params === 'object') {
+      return axiosInstance.delete(url, { ...paramsOrConfig, ...options })
+    }
+    return axiosInstance.delete(url, { params: paramsOrConfig, ...options })
   },
 
-  /**
-   * 发送分页请求
-   * @param {string} url - 请求URL
-   * @param {Object} options - 分页选项
-   * @param {number} options.page - 页码
-   * @param {number} options.pageSize - 每页数量
-   * @param {string} options.tag - 请求标签，用于取消请求
-   * @returns {Promise}
-   */
   paginate(url, { page = 1, pageSize = 20, ...params } = {}) {
     return axiosInstance.get(url, { params: { page, page_size: pageSize, ...params } })
   },
 
-  /**
-   * 上传文件
-   * @param {string} url - 请求URL
-   * @param {File} file - 文件对象
-   * @param {string} fieldName - 字段名
-   * @param {Object} extraData - 额外数据
-   * @param {string} options.tag - 请求标签，用于取消请求
-   * @returns {Promise}
-   */
   upload(url, file, fieldName = 'file', extraData = {}) {
     const formData = new FormData()
     formData.append(fieldName, file)
@@ -448,13 +344,6 @@ const request = {
     })
   },
 
-  /**
-   * 下载文件
-   * @param {string} url - 请求URL
-   * @param {Object} params - 查询参数
-   * @param {string} filename - 下载文件名
-   * @returns {Promise}
-   */
   download(url, params = {}, filename = 'download') {
     return axiosInstance.get(url, {
       params,
@@ -472,19 +361,10 @@ const request = {
     })
   },
 
-  /**
-   * 取消指定标签的所有请求
-   * @param {string} tag - 请求标签
-   * @returns {void}
-   */
   cancelPendingRequests(tag) {
     cancelPendingRequests(tag)
   },
 
-  /**
-   * 取消所有待处理的请求
-   * @returns {void}
-   */
   cancelAllPendingRequests() {
     cancelAllPendingRequests()
   }

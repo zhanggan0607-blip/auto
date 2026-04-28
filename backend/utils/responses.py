@@ -98,6 +98,8 @@ class UnifiedResponse:
             resolved_code = error_code
             resolved_message = get_error_message(error_code, message)
             resolved_status = get_http_status(error_code)
+            if resolved_status == 500 and status_code != 500:
+                resolved_status = status_code
         elif code:
             resolved_code = code
             resolved_message = message

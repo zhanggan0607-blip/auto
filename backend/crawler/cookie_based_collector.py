@@ -1,6 +1,10 @@
 """
 支持Cookie登录的企业信息采集器
 使用登录态Cookie绑过登录验证
+
+.. deprecated::
+    请使用 `common.crawler.common_crawler.CommonCrawler` 替代
+    此模块将在未来版本中移除
 """
 import asyncio
 import logging
@@ -10,7 +14,7 @@ from typing import Dict, List, Any, Optional
 from urllib.parse import quote
 from datetime import datetime
 
-from crawler.cookie_manager import cookie_manager
+from common.crawler import cookie_manager
 
 logger = logging.getLogger(__name__)
 
